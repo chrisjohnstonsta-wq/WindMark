@@ -1,7 +1,7 @@
 /* WindMark — small shared helpers.
    Deliberately plain: no modules, no build step, no dependencies. */
 
-var WM_VERSION = '1.0.0';
+var WM_VERSION = '1.1.0';
 var WM_SCHEMA_VERSION = 1;
 
 /* ---------- numbers / bearings ---------------------------------------- */
@@ -38,11 +38,33 @@ function angleDiff(a, b) {
   return d;
 }
 
-/* Whole-degree bearing string, always three digits: "007", "284". */
+/* Whole-degree bearing string, always three digits: "007", "284".
+   Bare digits are NOT a legal bearing display on their own — always pass
+   them through bearingText(), or append the reference yourself. */
 function deg3(deg) {
   if (deg === null || deg === undefined) return '---';
   var d = Math.round(norm360(deg)) % 360;
   return ('00' + d).slice(-3);
+}
+
+/* The one and only way a directional bearing is written in the UI.
+   Every bearing carries its reference — °T (true) or °M (magnetic) — so a
+   number on screen can never be misread as the other kind.
+     bearingText(284, 'true')     -> "284°T"
+     bearingText(276, 'magnetic') -> "276°M"
+     bearingText(null, 'true')    -> "---°T"                              */
+function bearingText(deg, ref) {
+  return deg3(deg) + refSuffix(ref);
+}
+
+/* "°T" / "°M". Anything that is not explicitly magnetic is true, because
+   true is what WindMark stores and shows as authoritative. */
+function refSuffix(ref) {
+  return (ref === 'magnetic' || ref === 'M') ? '°M' : '°T';
+}
+
+function refWord(ref) {
+  return (ref === 'magnetic' || ref === 'M') ? 'MAGNETIC' : 'TRUE';
 }
 
 /* Circular (vector) mean of bearings in degrees.

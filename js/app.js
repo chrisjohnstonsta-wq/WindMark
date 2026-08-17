@@ -19,6 +19,8 @@ var App = (function () {
   var pending = null;        // in-progress mark, see startMark()
   var detailId = null;       // observation open on the detail screen
   var manualCtx = null;      // 'new' | 'change' | 'edit'
+  var manualRef = 'magnetic'; // reference for the bearing being entered RIGHT NOW;
+                              // seeded from the last choice, changeable per entry
   var lastSavedId = null;
   var overlayTimer = null;
   var uiTimer = null;
@@ -111,10 +113,10 @@ var App = (function () {
     c.classList.toggle('ok', st.status === 'ok');
 
     var usable = usableSensorHeading(st);
-    el('heading-big').textContent = usable === null ? '---°T' : deg3(usable) + '°T';
-    el('wind-from').textContent = usable === null
-      ? 'WIND FROM ---°T'
-      : 'WIND FROM ' + deg3(reciprocal(usable)) + '°T';
+    // Always true-referenced and always labelled: the sensor reading has
+    // already been normalised by Compass before it reaches here.
+    el('heading-big').textContent = bearingText(usable, 'true');
+    el('wind-from').textContent = 'WIND FROM ' + bearingText(reciprocal(usable), 'true');
     el('heading-big').classList.toggle('dead', usable === null);
 
     el('dec-line').textContent = decText(settings.declination) +
@@ -186,15 +188,26 @@ var App = (function () {
     if (!pending) return;
     el('mark-time').textContent = 'MARKED ' + hhmmss(pending.t);
     if (pending.bearing) {
-      el('mark-bearing').textContent = 'WIND FROM ' + deg3(reciprocal(pending.bearing.downwind_true)) + '°T';
-      el('mark-sub').textContent = 'blowing toward ' + deg3(pending.bearing.downwind_true) + '°T · ' +
-        (pending.bearing.source === 'sensor' ? 'phone compass' : 'by hand') +
+      el('mark-bearing').textContent = 'WIND FROM ' + bearingText(reciprocal(pending.bearing.downwind_true), 'true');
+      el('mark-sub').textContent = 'blowing toward ' + bearingText(pending.bearing.downwind_true, 'true') + ' · ' +
+        markSourceText(pending.bearing) +
         (pending.compassWarn ? ' · CHECK COMPASS' : '');
     } else {
       el('mark-bearing').textContent = 'NO BEARING';
       el('mark-sub').textContent = 'Only NO DISCERNIBLE WIND can be saved without a bearing.';
     }
     el('mark-sub').classList.toggle('warn', !pending.bearing || !!pending.compassWarn);
+  }
+
+  /* Where the frozen bearing came from, stated with its reference so the
+     handler can see the correction that was applied. */
+  function markSourceText(b) {
+    var src = b.source === 'sensor' ? 'phone compass' : 'by hand';
+    if (b.declination_applied && b.heading_magnetic_raw !== null && b.heading_magnetic_raw !== undefined) {
+      return src + ' ' + bearingText(b.heading_magnetic_raw, 'magnetic') +
+             ' ' + (settings.declination >= 0 ? '+' : '−') + Math.abs(settings.declination) + '°';
+    }
+    return src + ' (read as TRUE °T)';
   }
 
   function cancelMark() {
@@ -268,7 +281,7 @@ var App = (function () {
 
     var main = (intensity === 'none')
       ? 'NO DISCERNIBLE WIND'
-      : 'FROM ' + deg3(rec.from_true) + '°T · ' + INTENSITY_LABEL[intensity];
+      : 'FROM ' + bearingText(rec.from_true, 'true') + ' · ' + INTENSITY_LABEL[intensity];
     var sub = [];
     if (rec.gusty) sub.push('GUSTY');
     if (rec.speed_mph !== null) sub.push(rec.speed_mph + ' mph (Kestrel)');
@@ -312,7 +325,11 @@ var App = (function () {
 
   /* ---------- manual bearing entry ------------------------------------------ */
 
-  function openManual(prefill) {
+  /* ref is optional: pass it when the prefilled number is known to be in a
+     particular reference (correcting an existing observation). Otherwise the
+     handler's last choice is used as the default. */
+  function openManual(prefill, ref) {
+    manualRef = (ref === 'magnetic' || ref === 'true') ? ref : settings.manual_ref;
     el('in-manual').value = (prefill === null || prefill === undefined) ? '' : String(Math.round(prefill));
     updateManualPreview();
     show('manual');
@@ -322,7 +339,7 @@ var App = (function () {
   /* Applies declination only when the handler said their reading is magnetic.
      A true (declination-adjusted) reading must NOT be corrected twice. */
   function manualToTrue(entered) {
-    return toTrueBearing(entered, settings.manual_ref, settings.declination);
+    return toTrueBearing(entered, manualRef, settings.declination);
   }
 
   function readManual() {
@@ -332,14 +349,26 @@ var App = (function () {
   }
 
   function updateManualPreview() {
-    el('manual-ref-line').textContent = settings.manual_ref === 'magnetic'
-      ? 'Readings entered as MAGNETIC · ' + decText(settings.declination) + ' will be applied'
-      : 'Readings entered as TRUE · no declination correction applied';
+    var mag = manualRef === 'magnetic';
+
+    var segs = document.querySelectorAll('[data-entryref]');
+    for (var i = 0; i < segs.length; i++) {
+      segs[i].classList.toggle('on', segs[i].getAttribute('data-entryref') === manualRef);
+    }
+    el('manual-suffix').textContent = refSuffix(manualRef);
+    el('manual-ref-line').textContent = mag
+      ? 'degrees MAGNETIC · ' + decText(settings.declination) + ' will be applied'
+      : 'degrees TRUE · no declination correction applied';
+
     var v = readManual();
     var p = el('manual-preview');
     if (v === null) { p.textContent = '—'; return; }
     var t = manualToTrue(v);
-    p.innerHTML = 'blowing toward <b>' + deg3(t) + '°T</b><br>WIND FROM <b>' + deg3(reciprocal(t)) + '°T</b>';
+    // Show the conversion, not just the result, so a wrong M/T choice is
+    // obvious before it is committed.
+    p.innerHTML = (mag ? '<span class="conv">' + esc(bearingText(v, 'magnetic')) + ' &rarr; </span>' : '') +
+      'blowing toward <b>' + esc(bearingText(t, 'true')) + '</b><br>WIND FROM <b>' +
+      esc(bearingText(reciprocal(t), 'true')) + '</b>';
   }
 
   function acceptManual() {
@@ -348,11 +377,19 @@ var App = (function () {
     var t = Math.round(manualToTrue(v)) % 360;
     var b = {
       downwind_true: t,
-      heading_magnetic_raw: settings.manual_ref === 'magnetic' ? Math.round(v) % 360 : null,
+      // Raw magnetic is provenance only. A true-referenced entry has no
+      // magnetic reading, and we will not back-compute a fake one.
+      heading_magnetic_raw: manualRef === 'magnetic' ? Math.round(v) % 360 : null,
       source: 'manual',
-      input_ref: settings.manual_ref,
-      declination_applied: settings.manual_ref === 'magnetic'
+      input_ref: manualRef,
+      declination_applied: manualRef === 'magnetic'
     };
+
+    // Remember this choice as the default for the next hand entry.
+    if (settings.manual_ref !== manualRef) {
+      settings.manual_ref = manualRef;
+      Store.saveSettings(settings);
+    }
 
     if (manualCtx === 'edit' && detailId) {
       var err = Store.updateObservation(detailId, {
@@ -398,7 +435,7 @@ var App = (function () {
       var o = obs[i];
       var time = o.t ? o.t.slice(11, 16) : '--:--';
       var dir = (o.from_true === null || o.from_true === undefined)
-        ? 'No wind' : 'From ' + deg3(o.from_true) + '°T';
+        ? 'No wind' : 'From ' + bearingText(o.from_true, 'true');
       var inten = o.intensity === 'none' ? '—' : INTENSITY_LABEL[o.intensity] || o.intensity;
       var extra = '';
       if (o.gusty) extra += ' G';
@@ -437,18 +474,21 @@ var App = (function () {
     var html = '';
     html += '<div class="detail-head">' +
       (o.from_true === null || o.from_true === undefined ? 'NO DISCERNIBLE WIND'
-        : 'WIND FROM ' + deg3(o.from_true) + '°T') + '</div>';
+        : 'WIND FROM ' + bearingText(o.from_true, 'true')) + '</div>';
     html += '<div class="detail-sub">' + esc(INTENSITY_LABEL[o.intensity] || o.intensity) +
       (o.gusty ? ' · GUSTY' : '') +
       (o.speed_mph !== null && o.speed_mph !== undefined ? ' · ' + o.speed_mph + ' mph Kestrel' : '') +
       '</div>';
 
     html += row('time', o.t);
-    html += row('blowing toward', o.downwind_true === null || o.downwind_true === undefined ? '—' : deg3(o.downwind_true) + '°T');
-    html += row('wind from', o.from_true === null || o.from_true === undefined ? '—' : deg3(o.from_true) + '°T');
+    html += row('wind toward (true)', o.downwind_true === null || o.downwind_true === undefined
+      ? '—' : bearingText(o.downwind_true, 'true'));
+    html += row('wind from (true)', o.from_true === null || o.from_true === undefined
+      ? '—' : bearingText(o.from_true, 'true'));
     html += row('bearing source', o.bearing_source);
-    html += row('reading entered as', o.bearing_input_ref);
-    html += row('raw magnetic', o.heading_magnetic_raw === null || o.heading_magnetic_raw === undefined ? '—' : deg3(o.heading_magnetic_raw) + '°M');
+    html += row('reading taken as', o.bearing_input_ref ? refWord(o.bearing_input_ref) + ' ' + refSuffix(o.bearing_input_ref) : '—');
+    html += row('raw input (provenance)', o.heading_magnetic_raw === null || o.heading_magnetic_raw === undefined
+      ? '—' : bearingText(o.heading_magnetic_raw, 'magnetic'));
     html += row('declination', o.declination + '°' + (o.declination_applied ? ' (applied)' : ' (not applied)'));
     html += row('speed source', o.speed_source);
     html += row('lat, lon', (o.lat === null || o.lat === undefined) ? '—' :
@@ -508,10 +548,12 @@ var App = (function () {
       manualCtx = 'edit';
       var cur = Store.getObservation(detailId);
       // Prefill with the entered value where we know it, else the true bearing.
-      var pre = (cur.bearing_input_ref === 'magnetic' && cur.heading_magnetic_raw !== null &&
-                 cur.heading_magnetic_raw !== undefined && settings.manual_ref === 'magnetic')
-        ? cur.heading_magnetic_raw : cur.downwind_true;
-      openManual(pre === undefined ? null : pre);
+      if (cur.bearing_input_ref === 'magnetic' && cur.heading_magnetic_raw !== null &&
+          cur.heading_magnetic_raw !== undefined) {
+        openManual(cur.heading_magnetic_raw, 'magnetic');   // re-edit the reading as taken
+      } else {
+        openManual(cur.downwind_true === undefined ? null : cur.downwind_true, 'true');
+      }
     });
 
     el('btn-fix-gusty').addEventListener('click', function () {
@@ -659,10 +701,12 @@ var App = (function () {
       pad2(d.getHours()) + pad2(d.getMinutes()) + '.csv';
   }
 
-  function exportCSV(observations, label) {
+  /* provenance = true exports the debugging file (raw magnetic included).
+     The default export carries true-referenced wind bearings only. */
+  function exportCSV(observations, label, provenance) {
     if (!observations.length) { alert('Nothing to export in ' + label + '.'); return; }
-    var csv = Store.toCSV(observations);
-    var name = csvFilename(label);
+    var csv = provenance ? Store.toProvenanceCSV(observations) : Store.toCSV(observations);
+    var name = csvFilename(label + (provenance ? '-provenance' : ''));
     var blob = new Blob([csv], { type: 'text/csv' });
 
     // Preferred on iOS: share sheet with the file attached (Save to Files,
@@ -702,7 +746,7 @@ var App = (function () {
     var c = Compass.state;
     var g = Gps.state;
     var usable = usableSensorHeading(c);
-    el('diag-heading').textContent = usable === null ? '---°T' : deg3(usable) + '°T';
+    el('diag-heading').textContent = bearingText(usable, 'true');
 
     function n(v, dp) {
       if (v === null || v === undefined || (typeof v === 'number' && !isFinite(v))) return '—';
@@ -718,16 +762,19 @@ var App = (function () {
     lines.push('  source        ' + (c.source || '—'));
     lines.push('  permission    ' + c.permission);
     lines.push('  events        ' + c.eventCount + (c.lastEventAt ? ' (last ' + Math.round((Date.now() - c.lastEventAt)) + ' ms ago)' : ''));
+    lines.push('  -- raw orientation angles below are not bearings --');
     lines.push('  alpha         ' + n(c.alpha));
     lines.push('  beta          ' + n(c.beta));
     lines.push('  gamma         ' + n(c.gamma));
     lines.push('  absolute flag ' + (c.absolute === null || c.absolute === undefined ? '—' : String(c.absolute)));
-    lines.push('  raw heading   ' + n(c.raw) + '   (as reported by platform)');
-    lines.push('  smoothed      ' + n(c.smoothed) + '   (circular mean, ' + Compass.SMOOTH_MS + ' ms)');
+    var sref = settings.sensor_ref;   // what the platform's number is taken to be
+    lines.push('  raw heading   ' + n(c.raw) + refSuffix(sref) + '   (as reported by platform)');
+    lines.push('  smoothed      ' + n(c.smoothed) + refSuffix(sref) + '   (circular mean, ' + Compass.SMOOTH_MS + ' ms)');
     lines.push('  consistency   ' + n(c.consistency, 2) + '   (1.00 = steady, low = jittery)');
-    lines.push('  reported as   ' + settings.sensor_ref.toUpperCase());
-    lines.push('  declination   ' + (settings.declination >= 0 ? '+' : '') + settings.declination + '°');
-    lines.push('  TRUE heading  ' + n(c.trueHeading) + '   ' + (settings.sensor_ref === 'magnetic' ? '= raw + declination' : '= raw (no correction)'));
+    lines.push('  reported as   ' + refWord(sref) + ' ' + refSuffix(sref));
+    lines.push('  declination   ' + (settings.declination >= 0 ? '+' : '') + settings.declination + '° east');
+    lines.push('  TRUE heading  ' + n(c.trueHeading) + '°T   ' +
+      (sref === 'magnetic' ? '= raw°M + declination' : '= raw°T (no correction)'));
     lines.push('  compass acc   ' + (c.accuracy === null ? 'not reported' : n(c.accuracy) + '°' + (c.accuracy < 0 ? ' (INVALID / uncalibrated)' : '')));
     lines.push('  tilt warning  ' + (c.tiltWarn ? 'YES — top edge near vertical' : 'no'));
     lines.push('');
@@ -805,6 +852,13 @@ var App = (function () {
 
     // manual bearing
     el('in-manual').addEventListener('input', updateManualPreview);
+    var erefs = document.querySelectorAll('[data-entryref]');
+    for (var r = 0; r < erefs.length; r++) {
+      erefs[r].addEventListener('click', function () {
+        manualRef = this.getAttribute('data-entryref');
+        updateManualPreview();
+      });
+    }
     var nudges = document.querySelectorAll('[data-nudge]');
     for (var k = 0; k < nudges.length; k++) {
       nudges[k].addEventListener('click', function () {
@@ -886,6 +940,9 @@ var App = (function () {
     });
     el('btn-export-all').addEventListener('click', function () {
       exportCSV(Store.getAllObservations(), 'all-searches');
+    });
+    el('btn-export-prov').addEventListener('click', function () {
+      exportCSV(Store.getAllObservations(), 'all-searches', true);
     });
 
     // diagnostics

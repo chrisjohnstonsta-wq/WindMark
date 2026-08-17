@@ -163,17 +163,55 @@ var Store = (function () {
     return null;
   }
 
-  /* ---------- CSV -------------------------------------------------------- */
+  /* ---------- export ------------------------------------------------------
 
-  /* Every stored field, unmodified. Blank cell for null/undefined so that a
-     missing bearing stays visibly missing rather than becoming 0. */
-  var CSV_FIELDS = [
-    'schema_version', 'id', 'session_id', 'session_name', 't',
-    'lat', 'lon', 'acc_m', 'gps_fix_t', 'gps_fix_age_s',
-    'downwind_true', 'from_true', 'heading_magnetic_raw',
-    'declination', 'declination_applied', 'bearing_source', 'bearing_input_ref',
-    'intensity', 'speed_mph', 'speed_source', 'gusty', 'note', 'app_version'
+     Two exports, deliberately different in kind.
+
+     The OPERATIONAL export is the one that goes to the map, the debrief, and
+     anyone else's software. Every wind-direction bearing in it is TRUE, and
+     every bearing column says so in its own name (..._deg_true). Raw
+     magnetic readings are NOT in it: a magnetic bearing sitting next to a
+     true one in a spreadsheet is exactly how a log gets misread, and nothing
+     downstream should ever have to ask which north a column meant.
+
+     The PROVENANCE export is for debugging and audit. It carries every
+     stored field, including the raw magnetic reading, the declination, and
+     whether that declination was applied — clearly named so it cannot be
+     mistaken for the operational file.
+
+     The same rule governs GPX and GeoJSON when they are added later: derive
+     them from OPERATIONAL_FIELDS, never from the raw record.               */
+
+  /* [ column name, function of (observation) ] */
+  var OPERATIONAL_FIELDS = [
+    ['schema_version', function (o) { return o.schema_version; }],
+    ['id', function (o) { return o.id; }],
+    ['session_id', function (o) { return o.session_id; }],
+    ['session_name', function (o) { return o.session_name; }],
+    ['t', function (o) { return o.t; }],
+    ['lat', function (o) { return o.lat; }],
+    ['lon', function (o) { return o.lon; }],
+    ['acc_m', function (o) { return o.acc_m; }],
+    ['gps_fix_t', function (o) { return o.gps_fix_t; }],
+    ['gps_fix_age_s', function (o) { return o.gps_fix_age_s; }],
+    // The authoritative wind direction, true-referenced, both senses.
+    ['wind_from_deg_true', function (o) { return o.from_true; }],
+    ['wind_toward_deg_true', function (o) { return o.downwind_true; }],
+    ['bearing_source', function (o) { return o.bearing_source; }],
+    ['intensity', function (o) { return o.intensity; }],
+    ['speed_mph', function (o) { return o.speed_mph; }],
+    ['speed_source', function (o) { return o.speed_source; }],
+    ['gusty', function (o) { return o.gusty; }],
+    ['note', function (o) { return o.note; }],
+    ['app_version', function (o) { return o.app_version; }]
   ];
+
+  var PROVENANCE_FIELDS = OPERATIONAL_FIELDS.concat([
+    ['raw_input_deg_magnetic', function (o) { return o.heading_magnetic_raw; }],
+    ['input_reference', function (o) { return o.bearing_input_ref; }],
+    ['declination_deg_east', function (o) { return o.declination; }],
+    ['declination_applied', function (o) { return o.declination_applied; }]
+  ]);
 
   function csvCell(v) {
     if (v === null || v === undefined) return '';
@@ -182,21 +220,26 @@ var Store = (function () {
     return s;
   }
 
-  function toCSV(observations) {
-    var sessions = getSessions();
+  function buildCSV(observations, fields) {
     var nameById = {};
-    sessions.forEach(function (s) { nameById[s.id] = s.name; });
+    getSessions().forEach(function (s) { nameById[s.id] = s.name; });
 
-    var lines = [CSV_FIELDS.join(',')];
+    var lines = [fields.map(function (f) { return f[0]; }).join(',')];
     observations.forEach(function (o) {
-      var row = CSV_FIELDS.map(function (f) {
-        if (f === 'session_name') return csvCell(o.session_name || nameById[o.session_id] || '');
-        return csvCell(o[f]);
-      });
-      lines.push(row.join(','));
+      lines.push(fields.map(function (f) {
+        var v = f[1](o);
+        if (f[0] === 'session_name') v = v || nameById[o.session_id] || '';
+        return csvCell(v);
+      }).join(','));
     });
     return lines.join('\r\n') + '\r\n';
   }
+
+  /* Operational: true bearings only. */
+  function toCSV(observations) { return buildCSV(observations, OPERATIONAL_FIELDS); }
+
+  /* Provenance: everything, including the raw magnetic reading. */
+  function toProvenanceCSV(observations) { return buildCSV(observations, PROVENANCE_FIELDS); }
 
   /* ---------- diagnostics ------------------------------------------------ */
 
@@ -231,6 +274,8 @@ var Store = (function () {
     getAllObservations: getAllObservations, getObservations: getObservations,
     getObservation: getObservation, addObservation: addObservation,
     updateObservation: updateObservation, deleteObservation: deleteObservation,
-    toCSV: toCSV, usageBytes: usageBytes, selfTest: selfTest
+    toCSV: toCSV, toProvenanceCSV: toProvenanceCSV,
+    OPERATIONAL_FIELDS: OPERATIONAL_FIELDS, PROVENANCE_FIELDS: PROVENANCE_FIELDS,
+    usageBytes: usageBytes, selfTest: selfTest
   };
 })();

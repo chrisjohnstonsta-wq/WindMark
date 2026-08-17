@@ -26,6 +26,23 @@ Nothing is ever auto-captured. Nothing is saved without an intensity tap.
 
 ---
 
+## Bearing reference — °M and °T
+
+Every directional bearing shown anywhere in the app carries its reference: **°T** for
+true, **°M** for magnetic. There is no bare bearing number in the UI, and there is one
+helper (`bearingText`) that all of them go through.
+
+Input may originate as either. **Wind direction is normalised to true before it is
+stored or used as authoritative data** — the sensor path applies the correction inside
+the compass module, the hand-entry path applies it at commit, and both write
+`downwind_true` / `from_true`. Declination is applied to magnetic input only; a true
+reading is never corrected twice.
+
+The raw magnetic reading is kept in storage for provenance and debugging
+(`heading_magnetic_raw`, with `bearing_input_ref` and `declination_applied`), and it is
+labelled as provenance wherever it is shown. It is not an operational bearing and does
+not appear in the standard export.
+
 ## Direction convention
 
 This is the part that must never be reversed:
@@ -47,14 +64,16 @@ Default is **+8° E**, adjustable in Settings, and shown on the capture screen a
 `DEC +8°E`. There is no geomagnetic model and no automatic lookup — set it from your
 map or NOAA before the search.
 
-Two independent reference settings exist, because they are two different questions:
+Two independent reference controls exist, because they are two different questions:
 
-* **Manual compass readings — MAGNETIC / TRUE.** If your Silva is set with a
-  declination scale, choose TRUE and no correction is applied. Choose MAGNETIC and the
-  configured declination is added. A true reading is never corrected twice.
-* **Phone sensor heading is — MAGNETIC / TRUE.** Browsers do not document which north
-  they report. The default assumption is MAGNETIC (declination applied). Settle it
-  with the SENSOR PROOF screen and a real compass before trusting a log — see below.
+* **Per-entry, on the bearing-by-hand screen — `MAGNETIC °M` / `TRUE °T`.** Chosen for
+  each reading, next to the number, with the suffix repeated on the input field and a
+  live conversion under it (`276°M → blowing toward 284°T / WIND FROM 104°T`). It
+  defaults to whatever you picked last; Settings shows and sets that default. If your
+  Silva is set with a declination scale, use TRUE °T and no correction is applied.
+* **Phone sensor heading is — MAGNETIC °M / TRUE °T.** Browsers do not document which
+  north they report. The default assumption is MAGNETIC (declination applied). Settle
+  it with the SENSOR PROOF screen and a real compass before trusting a log.
 
 Every observation stores the declination in effect, whether it was applied
 (`declination_applied`), the bearing source, and what the reading was entered as, so
@@ -107,8 +126,9 @@ Every sensor failure produces a visible explanation and a fallback:
 * top edge near vertical → "Hold the phone flatter"
 
 `ENTER BEARING BY HAND` is always on the capture screen, and pressing MARK WIND with no
-usable heading goes straight to it. Entry is a large number field with −10/−1/+1/+10
-buttons and a live preview of the resulting true and "from" bearings.
+usable heading goes straight to it. Entry is a large number field carrying its own °M/°T
+suffix, a `MAGNETIC °M` / `TRUE °T` selector above it, −10/−1/+1/+10 buttons, and a live
+preview showing the conversion and the resulting true bearings.
 
 GPS never blocks a capture. A poor or stale fix is displayed and stored
 (`±24 m · fix 14 sec ago`), because a flagged observation beats a lost one. If location
@@ -151,7 +171,7 @@ mix: New / Rename / End / Delete, with confirmation on anything destructive.
   "speed_source": "estimated",
   "gusty": false,
   "note": "",
-  "app_version": "1.0.0"
+  "app_version": "1.1.0"
 }
 ```
 
@@ -159,8 +179,9 @@ mix: New / Rename / End / Delete, with confirmation on anything destructive.
 * `bearing_source`: `sensor` | `manual` | `null`
 * `bearing_input_ref`: `magnetic` | `true` | `null` — what the reading was before correction
 * `speed_source`: `estimated` | `kestrel`
-* `heading_magnetic_raw` is `null` when the reading was already true-referenced —
-  the app does not invent a magnetic value it never saw.
+* `heading_magnetic_raw` is provenance only, and is `null` when the reading was already
+  true-referenced — the app does not invent a magnetic value it never saw. Authoritative
+  direction is always `downwind_true` / `from_true`.
 
 **A categorical intensity never produces a numeric speed.** `speed_mph` stays `null`
 with `speed_source: "estimated"` unless an actual Kestrel reading is typed in, which
@@ -193,13 +214,34 @@ Kestrel speed, a free-text note, and delete (confirmed). Correcting an entry to
 
 ### CSV export
 
-`CSV` on the list screen (or Settings, for all searches) exports every stored field,
-unmodified, one row per observation. It uses Web Share with a file attachment where
-supported — on iPhone that is Save to Files / Mail / AirDrop, and it works with no
-connectivity — and falls back to a normal file download.
+Two files, deliberately different in kind.
 
-GPX, wind arrows, map overlay, and CalTopo integration are deliberately **not** in this
-build.
+**Standard (operational)** — `CSV` on the list screen, or Settings for all searches.
+Wind direction appears **only in true degrees**, in columns that say so:
+
+```
+schema_version,id,session_id,session_name,t,lat,lon,acc_m,gps_fix_t,gps_fix_age_s,
+wind_from_deg_true,wind_toward_deg_true,bearing_source,intensity,speed_mph,
+speed_source,gusty,note,app_version
+```
+
+No magnetic bearing appears in this file. A magnetic column sitting next to a true one
+in a spreadsheet is how a log gets misread, and nothing downstream should have to ask
+which north a column meant.
+
+**Provenance** — `PROVENANCE CSV (ALL, WITH RAW °M)` in Settings. Same columns plus
+`raw_input_deg_magnetic`, `input_reference`, `declination_deg_east`, and
+`declination_applied`, for debugging and audit. The filename is suffixed
+`-provenance` so the two cannot be confused.
+
+Both use Web Share with a file attachment where supported — on iPhone that is Save to
+Files / Mail / AirDrop, and it works with no connectivity — and fall back to a normal
+file download.
+
+GPX and GeoJSON are not in this build. When they are added they must be derived from
+`Store.OPERATIONAL_FIELDS` — true-referenced wind bearings only, labelled as such —
+never from the raw record. Wind arrows, map overlay, and CalTopo integration are
+likewise deliberately out of scope here.
 
 ---
 
@@ -241,8 +283,9 @@ tools/make_icons.py       regenerates the icons
 No build step, no bundler, no npm, no framework, no backend. Edit a file, reload.
 
 `node tools/selfcheck.js` verifies wraparound, circular averaging, the declination
-rule, the downwind/from convention, and the Euler-to-heading math (43 checks). It
-cannot verify the physical sensor — that still requires the walk outside with the Silva.
+rule, the downwind/from convention, the Euler-to-heading math, bearing labelling, and
+the true-only export rule (61 checks). It cannot verify the physical sensor — that
+still requires the walk outside with the Silva.
 
 ---
 
@@ -262,7 +305,12 @@ Software-verifiable, checked in a Chromium harness with faked sensors:
 - [x] "Calm" stores a directional bearing
 - [x] Estimated intensity never fabricates a numeric mph
 - [x] Kestrel speed is distinguishable from an estimate (`speed_source`)
-- [x] CSV export works offline and contains every stored field
+- [x] Every bearing in the UI carries °M or °T; no bare bearing numbers
+- [x] Manual entry selects M or T per reading and remembers the last choice
+- [x] Standard CSV exposes wind direction only as `wind_from_deg_true` /
+      `wind_toward_deg_true`, with no magnetic column
+- [x] Provenance CSV carries the raw °M reading, its reference, and the declination
+- [x] CSV export works offline
 
 Requires the phone, outdoors:
 

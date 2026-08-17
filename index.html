@@ -115,10 +115,17 @@
     off your compass and enter it below.
   </p>
 
-  <div class="manual-ref" id="manual-ref-line">Readings entered as: MAGNETIC (+8° declination will be applied)</div>
+  <div class="set-label">THIS READING IS</div>
+  <div class="seg" id="seg-entry-ref">
+    <button class="btn btn-seg" data-entryref="magnetic">MAGNETIC °M</button>
+    <button class="btn btn-seg" data-entryref="true">TRUE °T</button>
+  </div>
 
-  <input id="in-manual" class="manual-input" type="number" inputmode="decimal" step="1" min="0" max="360" placeholder="000">
-  <div class="manual-unit" id="manual-unit">degrees</div>
+  <div class="manual-row">
+    <input id="in-manual" class="manual-input" type="number" inputmode="decimal" step="1" min="0" max="360" placeholder="000">
+    <span class="manual-suffix" id="manual-suffix">°M</span>
+  </div>
+  <div class="manual-ref" id="manual-ref-line">degrees MAGNETIC · +8° declination will be applied</div>
 
   <div class="nudge-grid">
     <button class="btn btn-nudge" data-nudge="-10">−10</button>
@@ -187,19 +194,23 @@
   </div>
 
   <div class="set-group">
-    <div class="set-label">MANUAL COMPASS READINGS</div>
+    <div class="set-label">MANUAL BEARING DEFAULT</div>
     <div class="seg" id="seg-manual-ref">
-      <button class="btn btn-seg" data-manualref="magnetic">MAGNETIC</button>
-      <button class="btn btn-seg" data-manualref="true">TRUE</button>
+      <button class="btn btn-seg" data-manualref="magnetic">MAGNETIC °M</button>
+      <button class="btn btn-seg" data-manualref="true">TRUE °T</button>
     </div>
-    <div class="set-help">If your Silva is declination-adjusted, choose TRUE and no correction is applied.</div>
+    <div class="set-help">
+      Starting choice on the bearing-by-hand screen; it follows whatever you picked
+      last. If your Silva is declination-adjusted, use TRUE °T and no correction is
+      applied. Either way the observation is stored in true degrees.
+    </div>
   </div>
 
   <div class="set-group">
     <div class="set-label">PHONE SENSOR HEADING IS</div>
     <div class="seg" id="seg-sensor-ref">
-      <button class="btn btn-seg" data-sensorref="magnetic">MAGNETIC</button>
-      <button class="btn btn-seg" data-sensorref="true">TRUE</button>
+      <button class="btn btn-seg" data-sensorref="magnetic">MAGNETIC °M</button>
+      <button class="btn btn-seg" data-sensorref="true">TRUE °T</button>
     </div>
     <div class="set-help">
       Browsers do not say which north they report. Default MAGNETIC (declination applied).
@@ -222,6 +233,13 @@
     <div class="set-label">DATA</div>
     <button class="btn btn-wide" id="btn-settings-export">EXPORT CSV (THIS SEARCH)</button>
     <button class="btn btn-wide" id="btn-export-all">EXPORT CSV (ALL SEARCHES)</button>
+    <button class="btn btn-wide" id="btn-export-prov">PROVENANCE CSV (ALL, WITH RAW °M)</button>
+    <div class="set-help">
+      The standard CSV carries wind direction in true degrees only, in columns named
+      <b>wind_from_deg_true</b> and <b>wind_toward_deg_true</b>. The provenance file adds the
+      raw magnetic reading, the declination, and whether it was applied — for debugging
+      and audit, not for the map.
+    </div>
     <div class="set-help" id="storage-info">—</div>
   </div>
 

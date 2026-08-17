@@ -187,7 +187,15 @@ body {
 /* ---------- manual bearing -------------------------------------------------- */
 
 .manual-help { font-size: 17px; line-height: 1.4; margin: 4px 0 10px; }
-.manual-ref { color: var(--warn); font-size: 14px; font-weight: 700; margin-bottom: 10px; }
+.manual-ref { color: var(--warn); font-size: 14px; font-weight: 700; margin: 6px 0 10px; }
+.manual-row { display: flex; align-items: stretch; gap: 8px; margin-top: 10px; }
+.manual-row .manual-input { flex: 1 1 auto; width: auto; }
+.manual-suffix {
+  flex: 0 0 96px; display: flex; align-items: center; justify-content: center;
+  font-size: 40px; font-weight: 900; color: var(--accent);
+  border: 3px solid var(--accent); border-radius: 10px;
+}
+.conv { color: var(--dim); }
 .manual-input {
   width: 100%; background: var(--panel); border: 3px solid var(--line);
   border-radius: 10px; color: var(--fg); font-family: inherit;
@@ -195,7 +203,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 .manual-input:focus { outline: none; border-color: var(--accent); }
-.manual-unit { text-align: center; color: var(--dim); font-size: 13px; letter-spacing: 0.1em; margin-top: 4px; }
 .nudge-grid { display: flex; gap: 8px; margin: 12px 0; }
 .btn-nudge { flex: 1 1 0; font-size: 22px; }
 .manual-preview {
