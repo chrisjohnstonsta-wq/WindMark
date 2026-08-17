@@ -25,7 +25,7 @@ function reciprocal(deg) {
 /* Convert a compass reading into a TRUE bearing.
      true = magnetic + declination        (east declination positive)
    `ref` is what the reading already is: 'magnetic' or 'true'. A reading that
-   is already true-referenced — e.g. a Silva set with a declination scale —
+   is already true-referenced — e.g. a compass set with a declination scale —
    must NOT be corrected a second time. This is the single place that rule
    lives, so both the phone sensor and hand-entered bearings obey it. */
 function toTrueBearing(reading, ref, declination) {

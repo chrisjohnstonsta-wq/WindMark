@@ -2,7 +2,7 @@
    Plain node, no dependencies, no test framework. It checks the arithmetic
    that acceptance criteria 5-11 depend on — wraparound, circular averaging,
    declination, and the downwind/from convention. It cannot check the
-   physical sensor: that still needs a Silva compass and a walk outside. */
+   physical sensor: that still needs a compass and a walk outside. */
 
 var fs = require('fs');
 var path = require('path');
@@ -543,7 +543,7 @@ ok('the storage warning repeats the real reason',
   badStore.storage.detail === 'Storage unavailable: private mode', badStore.storage.detail);
 ok('a live storage self-test passes here', S.Store.selfTest() === null);
 
-/* Compass failure must always point at the Silva fallback. */
+/* Compass failure must always point at the manual-bearing fallback. */
 ['unreliable', 'denied', 'stale', 'unsupported', 'waiting', 'idle'].forEach(function (st) {
   var c = checkFor({
     offlineReady: true, storageError: null,

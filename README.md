@@ -70,7 +70,7 @@ Two independent reference controls exist, because they are two different questio
   each reading, next to the number, with the suffix repeated on the input field and a
   live conversion under it (`276°M → blowing toward 284°T / WIND FROM 104°T`). It
   defaults to whatever you picked last; Settings shows and sets that default. If your
-  Silva is set with a declination scale, use TRUE °T and no correction is applied.
+  compass is set with a declination scale, use TRUE °T and no correction is applied.
 * **The phone sensor's reference is decided by the source, not by a setting.**
   On iPhone, Safari reports `webkitCompassHeading`, which Apple documents as relative
   to **magnetic** north; WindMark always treats it as °M and always applies the
@@ -85,7 +85,7 @@ any log can be audited after the fact.
 
 ---
 
-## Phase 0 — sensor proof (do this first, outside, with the Silva)
+## Phase 0 — sensor proof (do this first, outside, with a compass)
 
 `SENSORS` on the capture screen opens the diagnostic page: GPS coordinates, accuracy,
 fix age, raw alpha/beta/gamma, the `absolute` flag, raw heading, smoothed heading,
@@ -95,8 +95,8 @@ active declination, computed true heading, storage and service-worker state.
 **Protocol**
 
 1. Stand clear of vehicles, power lines, and steel.
-2. Hold the phone flat, top edge pointed along a Silva sighting.
-3. Compare `TRUE heading` against the Silva (corrected for declination) on at least
+2. Hold the phone flat, top edge pointed along a compass sighting.
+3. Compare `TRUE heading` against the compass (corrected for declination) on at least
    eight headings spread around the circle.
 4. Explicitly test around north: **358°, 359°, 0°, 1°, 2°**. The reading must move
    smoothly through the seam and never show 180° of error.
@@ -215,7 +215,7 @@ BEARING does not exist on a no-discernible-wind observation.
   "speed_source": "estimated",
   "gusty": false,
   "note": "",
-  "app_version": "1.4.1"
+  "app_version": "1.4.2"
 }
 ```
 
@@ -312,7 +312,7 @@ line:
 
 ```
 OFFLINE READY ✓
-WindMark v1.4.1 cached locally
+WindMark v1.4.2 cached locally
 ```
 
 or
@@ -335,7 +335,7 @@ all four of:
 the service worker (`importScripts`), so the check and the cache can never disagree
 about what "cached" means. Because the cache name carries the version, a half-installed
 update cannot masquerade as ready: v1.5.0 asks for the v1.5.0 cache and gets `NOT READY`
-until that cache is complete, while v1.4.1 keeps working from its own.
+until that cache is complete, while v1.4.2 keeps working from its own.
 
 ### PRE-SEARCH CHECK
 
@@ -352,7 +352,7 @@ PRE-SEARCH CHECK
 Informational only — it is not a wizard and nothing here blocks a capture. Waiting for a
 first fix indoors counts as available; only a denied or absent geolocation warns. A
 compass that is not ready reads `COMPASS NOT READY — manual bearing remains available`,
-because the Silva and hand entry still do the job.
+because a hand compass and manual entry still do the job.
 
 ### Updating
 
@@ -411,7 +411,7 @@ Not passed until performed on the actual iPhone.
     * True wind direction
     * intensity
     * no magnetic directional column in the operational export
-19. Repeat several heading comparisons with the Silva, including around north.
+19. Repeat several heading comparisons with the compass, including around north.
 
 ---
 
@@ -467,7 +467,7 @@ Two optional Playwright harnesses cover what needs a real browser:
 `tools/browsercheck.js` (44 checks — screen flow, edit transitions, input rejection) and
 `tools/offlinecheck.js` (35 checks — real Cache Storage, offline cold start, a
 deliberately broken update, third-party request tracking). Neither can verify the
-physical sensor — that still requires the walk outside with the Silva.
+physical sensor — that still requires the walk outside with a compass.
 
 ---
 
@@ -507,7 +507,7 @@ Software-verifiable, checked in a Chromium harness with faked sensors:
 
 Requires the phone, outdoors:
 
-- [ ] Sensor bearing agrees with the Silva to ~±10° after declination, on multiple
+- [ ] Sensor bearing agrees with the compass to ~±10° after declination, on multiple
       headings including around north
 - [ ] Whether the phone's reported heading is magnetic or true (set in Settings)
 - [ ] Workflow comfortably usable one-handed, gloved, in bright sun

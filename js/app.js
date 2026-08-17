@@ -720,7 +720,7 @@ var App = (function () {
         'above to get the true bearing. Not adjustable.'
       : 'Applies only to the Android / absolute-orientation fallback, whose reference the ' +
         'browser does not document. Default MAGNETIC °M (declination applied). Check it on the ' +
-        'SENSOR PROOF screen against your Silva; if the phone already matches true bearings ' +
+        'SENSOR PROOF screen against your compass; if the phone already matches true bearings ' +
         'without the correction, switch to TRUE °T. It has no effect on iPhone.';
     var mr = document.querySelectorAll('[data-manualref]');
     for (var i = 0; i < mr.length; i++) {

@@ -60,7 +60,7 @@
 
    Either way the raw platform number is kept for provenance and the TRUE
    bearing is what the app treats as authoritative. The SENSOR PROOF screen
-   exists so all of this gets checked against a real Silva compass before
+   exists so all of this gets checked against a real compass before
    anyone trusts a log. */
 
 var Compass = (function () {
@@ -194,7 +194,7 @@ var Compass = (function () {
         state.message = 'Phone reports relative orientation only — not a compass. Use bearing by hand.';
       } else if (state.accuracy !== null && state.accuracy > 20) {
         state.status = 'unreliable';
-        state.message = 'Compass accuracy ±' + Math.round(state.accuracy) + '° — check against your Silva.';
+        state.message = 'Compass accuracy ±' + Math.round(state.accuracy) + '° — check against your compass.';
       } else {
         state.status = 'ok';
         state.message = state.source === 'ios' ? 'Compass OK (iOS heading)'

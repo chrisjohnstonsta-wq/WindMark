@@ -10,7 +10,7 @@
    from it, so a new version always installs into its own cache and can never
    be reported as offline-ready until that cache is complete. */
 
-var WM_VERSION = '1.4.1';
+var WM_VERSION = '1.4.2';
 var WM_CACHE_NAME = 'windmark-v' + WM_VERSION;
 
 var WM_ASSETS = [

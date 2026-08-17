@@ -167,7 +167,7 @@ var Offline = (function () {
   /* ---------- pre-search check ------------------------------------------
 
      Informational only. Nothing here blocks a capture, and a warn state is
-     never a reason not to search — a warned compass just means the Silva and
+     never a reason not to search — a warned compass just means a hand compass and
      hand entry do the work. Pure function, so the wording is testable.
 
        offlineReady  — Offline.state.ready
