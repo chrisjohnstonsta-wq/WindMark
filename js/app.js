@@ -21,6 +21,7 @@ var App = (function () {
   var manualCtx = null;      // 'new' | 'change' | 'edit'
   var manualRef = 'magnetic'; // reference for the bearing being entered RIGHT NOW;
                               // seeded from the last choice, changeable per entry
+  var pendingEditIntensity = null; // intensity waiting on a bearing during a correction
   var lastSavedId = null;
   var overlayTimer = null;
   var uiTimer = null;
@@ -119,8 +120,11 @@ var App = (function () {
     el('wind-from').textContent = 'WIND FROM ' + bearingText(reciprocal(usable), 'true');
     el('heading-big').classList.toggle('dead', usable === null);
 
+    // Show the reference actually in force for the live source, not the
+    // configured guess — on iOS the source pins it to magnetic.
     el('dec-line').textContent = decText(settings.declination) +
-      (settings.sensor_ref === 'true' ? ' · sensor reads TRUE' : '');
+      (st.source ? ' · sensor ' + refSuffix(st.sourceRef) : '') +
+      (st.sourceRef === 'true' ? ' (no correction)' : '');
 
     el('top-session').textContent = session ? session.name : '—';
     el('top-count').textContent = String(obsCount);
@@ -130,14 +134,12 @@ var App = (function () {
     obsCount = session ? Store.getObservations(session.id).length : 0;
   }
 
-  /* A sensor heading we are willing to write into a log. Relative
-     orientation (arbitrary alpha zero) is never acceptable. */
+  /* A sensor heading we are willing to write into a log. The rule lives in
+     Compass.isAuthoritative: status must be a clean 'ok'. Uncalibrated, poor
+     reported accuracy, too much tilt, stale events, or relative-only
+     orientation all mean the handler enters the bearing by hand instead. */
   function usableSensorHeading(st) {
-    if (!st) st = Compass.state;
-    if (st.trueHeading === null) return null;
-    if (st.source === 'relative') return null;
-    if (st.status === 'denied' || st.status === 'unsupported' || st.status === 'stale') return null;
-    return st.trueHeading;
+    return Compass.authoritativeTrueHeading(st || Compass.state);
   }
 
   /* ---------- mark flow --------------------------------------------------- */
@@ -159,14 +161,15 @@ var App = (function () {
     };
 
     if (h !== null) {
+      // st.sourceRef is decided by the source (iOS = magnetic, always), not
+      // by a global setting.
+      var magneticRaw = (st.sourceRef === 'magnetic');
       pending.bearing = {
         downwind_true: Math.round(h) % 360,
-        heading_magnetic_raw: settings.sensor_ref === 'true'
-          ? null                                  // sensor already true; no magnetic reading exists
-          : Math.round(st.smoothed) % 360,
+        heading_magnetic_raw: magneticRaw ? Math.round(st.smoothed) % 360 : null,
         source: 'sensor',
-        input_ref: settings.sensor_ref,
-        declination_applied: settings.sensor_ref !== 'true'
+        input_ref: st.sourceRef,
+        declination_applied: magneticRaw
       };
     }
 
@@ -176,7 +179,10 @@ var App = (function () {
     renderMarkHead();
     buzz(20);
 
-    if (withManual || pending.bearing === null) {
+    // Always go to the intensity screen. "No discernible wind" needs no
+    // bearing, so a dead compass must not cost the handler the two-tap
+    // workflow; hand entry is only demanded for a directional intensity.
+    if (withManual) {
       manualCtx = 'new';
       openManual(pending.bearing ? pending.bearing.downwind_true : null);
     } else {
@@ -193,9 +199,11 @@ var App = (function () {
         markSourceText(pending.bearing) +
         (pending.compassWarn ? ' · CHECK COMPASS' : '');
     } else {
-      el('mark-bearing').textContent = 'NO BEARING';
-      el('mark-sub').textContent = 'Only NO DISCERNIBLE WIND can be saved without a bearing.';
+      el('mark-bearing').textContent = 'NO USABLE BEARING';
+      el('mark-sub').textContent =
+        'No discernible wind can be saved as-is. Directional observations require a hand-entered bearing.';
     }
+    el('btn-change-bearing').textContent = pending.bearing ? 'CHANGE BEARING' : 'ENTER BEARING BY HAND';
     el('mark-sub').classList.toggle('warn', !pending.bearing || !!pending.compassWarn);
   }
 
@@ -342,11 +350,14 @@ var App = (function () {
     return toTrueBearing(entered, manualRef, settings.declination);
   }
 
+  /* null when the field is empty or the typed value is outside 0..360.
+     Out-of-range input is rejected, never wrapped: turning 999 into 279
+     would invent a bearing nobody read. */
   function readManual() {
-    var v = parseFloat(el('in-manual').value);
-    if (!isFinite(v)) return null;
-    return norm360(v);
+    return parseManualBearing(el('in-manual').value);
   }
+
+  function manualIsBlank() { return String(el('in-manual').value).trim() === ''; }
 
   function updateManualPreview() {
     var mag = manualRef === 'magnetic';
@@ -362,7 +373,11 @@ var App = (function () {
 
     var v = readManual();
     var p = el('manual-preview');
-    if (v === null) { p.textContent = '—'; return; }
+    if (v === null) {
+      p.innerHTML = manualIsBlank() ? '—'
+        : '<span class="bad-text">' + esc(MANUAL_RANGE_MESSAGE) + '</span>';
+      return;
+    }
     var t = manualToTrue(v);
     // Show the conversion, not just the result, so a wrong M/T choice is
     // obvious before it is committed.
@@ -373,7 +388,7 @@ var App = (function () {
 
   function acceptManual() {
     var v = readManual();
-    if (v === null) { alert('Enter a bearing from 0 to 360.'); return; }
+    if (v === null) { alert(MANUAL_RANGE_MESSAGE); return; }
     var t = Math.round(manualToTrue(v)) % 360;
     var b = {
       downwind_true: t,
@@ -392,7 +407,7 @@ var App = (function () {
     }
 
     if (manualCtx === 'edit' && detailId) {
-      var err = Store.updateObservation(detailId, {
+      var patch = {
         downwind_true: b.downwind_true,
         from_true: reciprocal(b.downwind_true),
         heading_magnetic_raw: b.heading_magnetic_raw,
@@ -400,7 +415,13 @@ var App = (function () {
         declination_applied: b.declination_applied,
         bearing_source: 'manual',
         bearing_input_ref: b.input_ref
-      });
+      };
+      // A bearing may only be attached together with a directional intensity,
+      // so switching "no discernible wind" to a directional category carries
+      // the new intensity in the same write.
+      if (pendingEditIntensity) patch.intensity = pendingEditIntensity;
+      pendingEditIntensity = null;
+      var err = Store.updateObservation(detailId, patch);
       if (err) alert(err);
       show('detail');
       return;
@@ -434,8 +455,8 @@ var App = (function () {
     for (var i = 0; i < obs.length; i++) {
       var o = obs[i];
       var time = o.t ? o.t.slice(11, 16) : '--:--';
-      var dir = (o.from_true === null || o.from_true === undefined)
-        ? 'No wind' : 'From ' + bearingText(o.from_true, 'true');
+      var nodir = (o.from_true === null || o.from_true === undefined);
+      var dir = nodir ? 'No discernible wind' : 'From ' + bearingText(o.from_true, 'true');
       var inten = o.intensity === 'none' ? '—' : INTENSITY_LABEL[o.intensity] || o.intensity;
       var extra = '';
       if (o.gusty) extra += ' G';
@@ -444,7 +465,7 @@ var App = (function () {
       var acc = (o.acc_m === null || o.acc_m === undefined) ? '—' : '±' + Math.round(o.acc_m) + 'm';
       html += '<button class="row" data-obs="' + esc(o.id) + '">' +
         '<span class="c-time">' + esc(time) + '</span>' +
-        '<span class="c-dir">' + esc(dir) + '</span>' +
+        '<span class="c-dir' + (nodir ? ' nodir' : '') + '">' + esc(dir) + '</span>' +
         '<span class="c-int">' + esc(inten) + esc(extra) + '</span>' +
         '<span class="c-acc">' + esc(acc) + '</span>' +
         '</button>';
@@ -506,10 +527,16 @@ var App = (function () {
     });
     html += '</div>';
 
+    // No bearing control for "no discernible wind" — attaching a direction
+    // to it would be a contradiction, so the path does not exist.
     html += '<div class="fix-grid2">' +
-      '<button class="btn btn-fix" id="btn-fix-bearing">CORRECT BEARING</button>' +
+      (o.intensity === 'none' ? ''
+        : '<button class="btn btn-fix" id="btn-fix-bearing">CORRECT BEARING</button>') +
       '<button class="btn btn-fix' + (o.gusty ? ' on' : '') + '" id="btn-fix-gusty">GUSTY: ' + (o.gusty ? 'ON' : 'OFF') + '</button>' +
-      '</div>';
+      '</div>' +
+      (o.intensity === 'none'
+        ? '<div class="set-help">No discernible wind carries no bearing. Choose a directional intensity above to add one.</div>'
+        : '');
 
     html += '<div class="set-label">KESTREL mph</div>' +
       '<div class="fix-grid2"><input id="fix-mph" class="mph-input wide" type="number" inputmode="decimal" step="0.1" min="0" value="' +
@@ -528,33 +555,55 @@ var App = (function () {
     for (var i = 0; i < ints.length; i++) {
       ints[i].addEventListener('click', function () {
         var k = this.getAttribute('data-fixint');
-        var patch = { intensity: k };
+        var cur = Store.getObservation(detailId);
+        if (!cur || cur.intensity === k) return;
+
         if (k === 'none') {
-          // "No discernible wind" must not retain a direction.
-          patch.downwind_true = null;
-          patch.from_true = null;
-          patch.heading_magnetic_raw = null;
-          patch.bearing_source = null;
-          patch.bearing_input_ref = null;
-          patch.declination_applied = false;
+          // "No discernible wind" must not retain a direction: clear the
+          // bearing and its whole provenance trail in one write.
+          var patch = { intensity: 'none' };
+          var nulls = Store.noDirectionFields();
+          for (var n in nulls) patch[n] = nulls[n];
+          var e1 = Store.updateObservation(detailId, patch);
+          if (e1) alert(e1);
+          renderDetail();
+          return;
         }
-        var err = Store.updateObservation(detailId, patch);
-        if (err) alert(err);
+
+        if (!Store.hasBearing(cur)) {
+          // Directional intensity on an observation with no direction: the
+          // handler must supply a bearing before the change can be accepted.
+          pendingEditIntensity = k;
+          manualCtx = 'edit';
+          openManual(null);
+          return;
+        }
+
+        var e2 = Store.updateObservation(detailId, { intensity: k });
+        if (e2) alert(e2);
         renderDetail();
       });
     }
 
-    el('btn-fix-bearing').addEventListener('click', function () {
-      manualCtx = 'edit';
-      var cur = Store.getObservation(detailId);
-      // Prefill with the entered value where we know it, else the true bearing.
-      if (cur.bearing_input_ref === 'magnetic' && cur.heading_magnetic_raw !== null &&
-          cur.heading_magnetic_raw !== undefined) {
-        openManual(cur.heading_magnetic_raw, 'magnetic');   // re-edit the reading as taken
-      } else {
-        openManual(cur.downwind_true === undefined ? null : cur.downwind_true, 'true');
-      }
-    });
+    if (el('btn-fix-bearing')) {
+      el('btn-fix-bearing').addEventListener('click', function () {
+        var cur = Store.getObservation(detailId);
+        // Guarded by the button not existing for 'none', but never trust one
+        // guard for an invariant this important.
+        if (!cur || cur.intensity === 'none') {
+          alert('Set a directional intensity first — no discernible wind carries no bearing.');
+          return;
+        }
+        manualCtx = 'edit';
+        pendingEditIntensity = null;
+        if (cur.bearing_input_ref === 'magnetic' && cur.heading_magnetic_raw !== null &&
+            cur.heading_magnetic_raw !== undefined) {
+          openManual(cur.heading_magnetic_raw, 'magnetic');   // re-edit the reading as taken
+        } else {
+          openManual(cur.downwind_true === undefined ? null : cur.downwind_true, 'true');
+        }
+      });
+    }
 
     el('btn-fix-gusty').addEventListener('click', function () {
       var cur = Store.getObservation(detailId);
@@ -607,11 +656,10 @@ var App = (function () {
       var active = s.id === session.id;
       html += '<div class="sess' + (active ? ' active' : '') + '">' +
         '<div class="sess-name">' + esc(s.name) + (active ? ' <span class="pill">ACTIVE</span>' : '') + '</div>' +
-        '<div class="sess-meta">' + esc(s.started) + ' · ' + n + ' obs' + (s.ended ? ' · ENDED' : '') + '</div>' +
+        '<div class="sess-meta">' + esc(s.started) + ' · ' + n + ' obs</div>' +
         '<div class="sess-actions">' +
         (active ? '' : '<button class="btn btn-sub" data-use="' + esc(s.id) + '">USE</button>') +
         '<button class="btn btn-sub" data-rename="' + esc(s.id) + '">RENAME</button>' +
-        (s.ended ? '' : '<button class="btn btn-sub" data-end="' + esc(s.id) + '">END</button>') +
         '<button class="btn btn-sub btn-danger" data-del="' + esc(s.id) + '">DELETE</button>' +
         '</div></div>';
     });
@@ -637,14 +685,10 @@ var App = (function () {
       if (!name) return;
       var err = Store.renameSession(id, name);
       if (err) alert(err);
+      // Exports read the current name by session_id, so a rename shows up in
+      // the next CSV without rewriting any stored observation.
       session = Store.getActiveSession();
       renderSessions(); updateCapture();
-    });
-    bind('end', function (id) {
-      if (!confirm('End this search? Its observations are kept. You can start a new search afterwards.')) return;
-      var err = Store.endSession(id);
-      if (err) alert(err);
-      renderSessions();
     });
     bind('del', function (id) {
       var cur = Store.getSessions().filter(function (s) { return s.id === id; })[0];
@@ -663,6 +707,21 @@ var App = (function () {
 
   function renderSettings() {
     el('in-dec').value = settings.declination;
+
+    // The iOS heading is magnetic by Apple's documentation, so there is
+    // nothing to choose: hide the control and say why. needsPermission() is
+    // an Apple-only API, so it identifies the platform even before the first
+    // orientation event has arrived.
+    var iosLocked = (Compass.state.source === 'ios') || Compass.needsPermission();
+    el('seg-sensor-ref').style.display = iosLocked ? 'none' : '';
+    el('sensor-ref-help').innerHTML = iosLocked
+      ? 'This iPhone reports <b>webkitCompassHeading</b>, which Apple documents as relative to ' +
+        '<b>magnetic north</b>. WindMark always treats it as MAGNETIC °M and applies the declination ' +
+        'above to get the true bearing. Not adjustable.'
+      : 'Applies only to the Android / absolute-orientation fallback, whose reference the ' +
+        'browser does not document. Default MAGNETIC °M (declination applied). Check it on the ' +
+        'SENSOR PROOF screen against your Silva; if the phone already matches true bearings ' +
+        'without the correction, switch to TRUE °T. It has no effect on iPhone.';
     var mr = document.querySelectorAll('[data-manualref]');
     for (var i = 0; i < mr.length; i++) {
       mr[i].classList.toggle('on', mr[i].getAttribute('data-manualref') === settings.manual_ref);
@@ -767,14 +826,20 @@ var App = (function () {
     lines.push('  beta          ' + n(c.beta));
     lines.push('  gamma         ' + n(c.gamma));
     lines.push('  absolute flag ' + (c.absolute === null || c.absolute === undefined ? '—' : String(c.absolute)));
-    var sref = settings.sensor_ref;   // what the platform's number is taken to be
-    lines.push('  raw heading   ' + n(c.raw) + refSuffix(sref) + '   (as reported by platform)');
+    // The reference is a property of the source, not of a global setting.
+    var sref = c.sourceRef;
+    lines.push('  raw sensor    ' + n(c.raw) + refSuffix(sref) + '   (as reported by platform)');
     lines.push('  smoothed      ' + n(c.smoothed) + refSuffix(sref) + '   (circular mean, ' + Compass.SMOOTH_MS + ' ms)');
     lines.push('  consistency   ' + n(c.consistency, 2) + '   (1.00 = steady, low = jittery)');
-    lines.push('  reported as   ' + refWord(sref) + ' ' + refSuffix(sref));
-    lines.push('  declination   ' + (settings.declination >= 0 ? '+' : '') + settings.declination + '° east');
-    lines.push('  TRUE heading  ' + n(c.trueHeading) + '°T   ' +
+    lines.push('  reference     ' + refWord(sref) + ' ' + refSuffix(sref) +
+      (c.refLocked ? '   (fixed: iOS webkitCompassHeading is magnetic)' : '   (configurable fallback)'));
+    lines.push('  declination   ' + (settings.declination >= 0 ? '+' : '−') +
+      Math.abs(settings.declination) + '°' + (settings.declination >= 0 ? 'E' : 'W'));
+    lines.push('  computed head ' + n(c.trueHeading) + '°T   ' +
       (sref === 'magnetic' ? '= raw°M + declination' : '= raw°T (no correction)'));
+    lines.push('  authoritative ' + (Compass.isAuthoritative(c)
+      ? 'YES — may be saved as a wind bearing'
+      : 'NO — status must be ok; use bearing by hand'));
     lines.push('  compass acc   ' + (c.accuracy === null ? 'not reported' : n(c.accuracy) + '°' + (c.accuracy < 0 ? ' (INVALID / uncalibrated)' : '')));
     lines.push('  tilt warning  ' + (c.tiltWarn ? 'YES — top edge near vertical' : 'no'));
     lines.push('');
@@ -870,7 +935,7 @@ var App = (function () {
     }
     el('btn-manual-ok').addEventListener('click', acceptManual);
     el('btn-manual-back').addEventListener('click', function () {
-      if (manualCtx === 'edit') { show('detail'); return; }
+      if (manualCtx === 'edit') { pendingEditIntensity = null; show('detail'); return; }
       if (pending && pending.bearing) { show('intensity'); return; }
       pending = null;
       show('capture');

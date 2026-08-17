@@ -1,7 +1,7 @@
 /* WindMark — small shared helpers.
    Deliberately plain: no modules, no build step, no dependencies. */
 
-var WM_VERSION = '1.1.0';
+var WM_VERSION = '1.2.0';
 var WM_SCHEMA_VERSION = 1;
 
 /* ---------- numbers / bearings ---------------------------------------- */
@@ -145,8 +145,29 @@ function decText(dec) {
   return 'DEC ' + (v > 0 ? '+' : '−') + Math.abs(v) + '°' + (v > 0 ? 'E' : 'W');
 }
 
+/* Parse a hand-typed bearing. Accepts 0 through 360 inclusive, with 360
+   normalised to 0. Anything else returns null and must be REJECTED by the
+   caller — silently wrapping 999 into 279 would fabricate a bearing the
+   handler never read off their compass. (The ±1/±10 nudge buttons wrap on
+   purpose; that is a different interaction.) */
+function parseManualBearing(raw) {
+  if (raw === null || raw === undefined) return null;
+  var s = String(raw).trim();
+  if (s === '') return null;
+  if (!/^[+]?\d*(\.\d+)?$/.test(s)) return null;   // no minus, no exponent, no junk
+  var v = Number(s);
+  if (!isFinite(v)) return null;
+  if (v < 0 || v > 360) return null;
+  return v === 360 ? 0 : v;
+}
+
+var MANUAL_RANGE_MESSAGE = 'Enter a bearing from 000° to 360°.';
+
+/* Always "No discernible wind", never a shortened form: the handler could
+   not determine a direction, which is a weaker claim than asserting the air
+   was still. The stored enum stays 'none'. */
 var INTENSITY_LABEL = {
-  none: 'NO WIND',
+  none: 'NO DISCERNIBLE WIND',
   calm: 'CALM',
   light: 'LIGHT',
   moderate: 'MODERATE',

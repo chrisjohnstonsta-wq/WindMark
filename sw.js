@@ -6,7 +6,7 @@
 
    Bump CACHE_NAME whenever any cached file changes. */
 
-var CACHE_NAME = 'windmark-v1.1.0';
+var CACHE_NAME = 'windmark-v1.2.0';
 
 var ASSETS = [
   './',

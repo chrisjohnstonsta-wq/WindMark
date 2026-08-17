@@ -196,6 +196,7 @@ body {
   border: 3px solid var(--accent); border-radius: 10px;
 }
 .conv { color: var(--dim); }
+.bad-text { color: var(--bad); font-size: 18px; font-weight: 700; }
 .manual-input {
   width: 100%; background: var(--panel); border: 3px solid var(--line);
   border-radius: 10px; color: var(--fg); font-family: inherit;
@@ -222,6 +223,9 @@ body {
 .row:active { background: #262c33; }
 .c-time { flex: 0 0 52px; color: var(--dim); font-variant-numeric: tabular-nums; }
 .c-dir { flex: 1 1 auto; font-weight: 800; font-variant-numeric: tabular-nums; }
+/* "No discernible wind" is longer than a bearing — let it fit without
+   truncating, rather than shortening the phrase. */
+.c-dir.nodir { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; }
 .c-int { flex: 0 0 auto; font-size: 14px; color: var(--dim); text-align: right; }
 .c-acc { flex: 0 0 52px; text-align: right; color: var(--dim); font-size: 14px; }
 .empty { color: var(--dim); text-align: center; padding: 40px 10px; }
@@ -236,6 +240,7 @@ body {
 .dv { font-size: 15px; text-align: right; word-break: break-all; }
 .fix-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .fix-grid .btn-fix { flex: 1 1 45%; }
+.fix-grid .btn-fix[data-fixint="none"] { flex: 1 1 100%; }
 .fix-grid2 { display: flex; gap: 8px; margin-bottom: 10px; align-items: stretch; }
 .fix-grid2 .btn-fix, .fix-grid2 .mph-input { flex: 1 1 0; }
 .btn-fix { min-height: var(--tap); font-size: 15px; }

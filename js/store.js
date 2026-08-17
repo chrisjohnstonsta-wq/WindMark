@@ -77,8 +77,9 @@ var Store = (function () {
     var s = {
       id: uuid(),
       name: name || ('Search ' + (list.length + 1)),
-      started: isoLocal(new Date()),
-      ended: null
+      started: isoLocal(new Date())
+      // No 'ended' state: switching or creating a search is enough. An
+      // `ended` field on older stored data is simply ignored.
     };
     list.push(s);
     var err = saveSessions(list);
@@ -108,20 +109,74 @@ var Store = (function () {
     return saveSessions(list);
   }
 
-  function endSession(id) {
-    var list = getSessions();
-    for (var i = 0; i < list.length; i++) {
-      if (list[i].id === id) list[i].ended = isoLocal(new Date());
-    }
-    return saveSessions(list);
-  }
-
   function deleteSession(id) {
     var list = getSessions().filter(function (s) { return s.id !== id; });
     var obs = getAllObservations().filter(function (o) { return o.session_id !== id; });
     var e1 = writeJSON(K_OBS, obs);
     if (e1) return e1;
     return saveSessions(list);
+  }
+
+  /* ---------- the bearing / intensity invariant ---------------------------
+
+     Two states, and nothing in between is representable:
+
+       intensity 'none'  (no discernible wind)
+         -> every direction and provenance field is null / false. The phone
+            heading at that moment did not represent wind and is discarded.
+
+       intensity calm|light|moderate|strong
+         -> must carry a valid true bearing, with from_true the reciprocal
+            of downwind_true.
+
+     addObservation and updateObservation both refuse anything else, so no UI
+     path — capture, correction, or otherwise — can persist a contradiction. */
+
+  var DIRECTIONAL = ['calm', 'light', 'moderate', 'strong'];
+
+  function isDirectional(intensity) { return DIRECTIONAL.indexOf(intensity) >= 0; }
+
+  /* The patch that strips all direction and provenance from a record. */
+  function noDirectionFields() {
+    return {
+      downwind_true: null,
+      from_true: null,
+      heading_magnetic_raw: null,
+      bearing_source: null,
+      bearing_input_ref: null,
+      declination_applied: false
+    };
+  }
+
+  function hasBearing(rec) {
+    return rec && typeof rec.downwind_true === 'number' && isFinite(rec.downwind_true);
+  }
+
+  /* Returns null when the record is legal, otherwise a message. */
+  function validateObservation(rec) {
+    if (!rec) return 'Missing observation.';
+
+    if (rec.intensity === 'none') {
+      var dirty = [];
+      ['downwind_true', 'from_true', 'heading_magnetic_raw',
+       'bearing_source', 'bearing_input_ref'].forEach(function (k) {
+        if (rec[k] !== null && rec[k] !== undefined) dirty.push(k);
+      });
+      if (rec.declination_applied) dirty.push('declination_applied');
+      return dirty.length
+        ? 'No discernible wind cannot carry direction data (' + dirty.join(', ') + ').'
+        : null;
+    }
+
+    if (!isDirectional(rec.intensity)) return 'Unknown intensity "' + rec.intensity + '".';
+    if (!hasBearing(rec)) return 'A directional observation needs a bearing.';
+    if (typeof rec.from_true !== 'number' || !isFinite(rec.from_true)) {
+      return 'A directional observation needs a bearing.';
+    }
+    if (norm360(rec.from_true) !== reciprocal(rec.downwind_true)) {
+      return 'from_true must be the reciprocal of downwind_true.';
+    }
+    return null;
   }
 
   /* ---------- observations ---------------------------------------------- */
@@ -137,18 +192,30 @@ var Store = (function () {
 
   /* Persist immediately. Returns null on success or an error string. */
   function addObservation(rec) {
+    var bad = validateObservation(rec);
+    if (bad) return bad;
     var all = getAllObservations();
     all.push(rec);
     return writeJSON(K_OBS, all);
   }
 
+  /* Applies the patch to a copy first and refuses the whole write if the
+     result would be contradictory — corrections are held to the same
+     invariant as captures. */
   function updateObservation(id, patch) {
     var all = getAllObservations();
+    var found = false;
     for (var i = 0; i < all.length; i++) {
-      if (all[i].id === id) {
-        for (var k in patch) all[i][k] = patch[k];
-      }
+      if (all[i].id !== id) continue;
+      found = true;
+      var merged = {};
+      for (var k in all[i]) merged[k] = all[i][k];
+      for (var j in patch) merged[j] = patch[j];
+      var bad = validateObservation(merged);
+      if (bad) return bad;
+      all[i] = merged;
     }
+    if (!found) return 'Observation not found.';
     return writeJSON(K_OBS, all);
   }
 
@@ -228,7 +295,10 @@ var Store = (function () {
     observations.forEach(function (o) {
       lines.push(fields.map(function (f) {
         var v = f[1](o);
-        if (f[0] === 'session_name') v = v || nameById[o.session_id] || '';
+        // Renaming a search must show up in the next export, so the current
+        // name wins; the name stored at capture time is only a fallback for
+        // observations whose search no longer exists.
+        if (f[0] === 'session_name') v = nameById[o.session_id] || v || '';
         return csvCell(v);
       }).join(','));
     });
@@ -270,10 +340,12 @@ var Store = (function () {
     getSettings: getSettings, saveSettings: saveSettings,
     getSessions: getSessions, newSession: newSession,
     getActiveSession: getActiveSession, setActiveSession: setActiveSession,
-    renameSession: renameSession, endSession: endSession, deleteSession: deleteSession,
+    renameSession: renameSession, deleteSession: deleteSession,
     getAllObservations: getAllObservations, getObservations: getObservations,
     getObservation: getObservation, addObservation: addObservation,
     updateObservation: updateObservation, deleteObservation: deleteObservation,
+    isDirectional: isDirectional, noDirectionFields: noDirectionFields,
+    hasBearing: hasBearing, validateObservation: validateObservation,
     toCSV: toCSV, toProvenanceCSV: toProvenanceCSV,
     OPERATIONAL_FIELDS: OPERATIONAL_FIELDS, PROVENANCE_FIELDS: PROVENANCE_FIELDS,
     usageBytes: usageBytes, selfTest: selfTest

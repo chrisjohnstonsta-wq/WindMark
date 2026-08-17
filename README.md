@@ -71,9 +71,13 @@ Two independent reference controls exist, because they are two different questio
   live conversion under it (`276°M → blowing toward 284°T / WIND FROM 104°T`). It
   defaults to whatever you picked last; Settings shows and sets that default. If your
   Silva is set with a declination scale, use TRUE °T and no correction is applied.
-* **Phone sensor heading is — MAGNETIC °M / TRUE °T.** Browsers do not document which
-  north they report. The default assumption is MAGNETIC (declination applied). Settle
-  it with the SENSOR PROOF screen and a real compass before trusting a log.
+* **The phone sensor's reference is decided by the source, not by a setting.**
+  On iPhone, Safari reports `webkitCompassHeading`, which Apple documents as relative
+  to **magnetic** north; WindMark always treats it as °M and always applies the
+  declination. That is not user-configurable. The Android / absolute-orientation
+  fallback has no documented reference, so a `PHONE SENSOR HEADING IS` control remains
+  for it alone — it is hidden on iPhone, and its help text says it applies only to the
+  fallback. Settle the fallback with the SENSOR PROOF screen and a real compass.
 
 Every observation stores the declination in effect, whether it was applied
 (`declination_applied`), the bearing source, and what the reading was entered as, so
@@ -98,10 +102,11 @@ active declination, computed true heading, storage and service-worker state.
    smoothly through the seam and never show 180° of error.
 5. Agreement should be within about **±10°**.
 
-If the phone reads consistently high by roughly the declination, the browser was
-already giving true north — switch *Phone sensor heading is* to TRUE in Settings and
-repeat. If it disagrees wildly or wanders, use bearing by hand; the app never hides
-this.
+On iPhone the reference is fixed (magnetic), so a consistent offset means the
+declination setting is wrong, not the reference. On the Android fallback only, a phone
+reading consistently high by roughly the declination means the browser was already
+giving true north — switch *Phone sensor heading is* to TRUE °T and repeat. If it
+disagrees wildly or wanders, use bearing by hand; the app never hides this.
 
 Heading smoothing is a **circular (vector) mean over the last 500 ms**. Bearings are
 never averaged arithmetically — `(359 + 1) / 2 = 180` is exactly backwards.
@@ -115,6 +120,12 @@ gets within ~25° of vertical the horizontal direction is meaningless and the ap
 
 ## When the compass will not cooperate
 
+**A sensor bearing is only ever saved when compass status is a clean `ok`.** Anything
+else — uncalibrated, reported accuracy worse than the threshold, too much tilt, no
+usable smoothed heading, stale events, relative-only orientation — is refused as
+authoritative and the capture screen shows `---°T`. The observation is never discarded
+for it: the handler enters the bearing by hand instead.
+
 Every sensor failure produces a visible explanation and a fallback:
 
 * orientation permission denied → explained, with **ENTER BEARING BY HAND**
@@ -125,10 +136,19 @@ Every sensor failure produces a visible explanation and a fallback:
 * uncalibrated / poor accuracy → shown with the reported accuracy
 * top edge near vertical → "Hold the phone flatter"
 
-`ENTER BEARING BY HAND` is always on the capture screen, and pressing MARK WIND with no
-usable heading goes straight to it. Entry is a large number field carrying its own °M/°T
-suffix, a `MAGNETIC °M` / `TRUE °T` selector above it, −10/−1/+1/+10 buttons, and a live
-preview showing the conversion and the resulting true bearings.
+MARK WIND always goes to the intensity screen, even with no usable heading — **No
+discernible wind needs no bearing and must stay a two-tap save** with a dead compass.
+The screen says so plainly (`NO USABLE BEARING · No discernible wind can be saved
+as-is. Directional observations require a hand-entered bearing.`), and only CALM /
+LIGHT / MODERATE / STRONG divert to hand entry before saving.
+
+`ENTER BEARING BY HAND` is also always on the capture screen. Entry is a large number
+field carrying its own °M/°T suffix, a `MAGNETIC °M` / `TRUE °T` selector above it,
+−10/−1/+1/+10 buttons, and a live preview showing the conversion and the resulting true
+bearings. Typed values must be **0 to 360 inclusive**; 360° normalises to 000°, and
+anything else (−1, 361, 999) is rejected with *Enter a bearing from 000° to 360°*
+rather than silently wrapped into a bearing nobody read. The nudge buttons still wrap
+around north on purpose.
 
 GPS never blocks a capture. A poor or stale fix is displayed and stored
 (`±24 m · fix 14 sec ago`), because a flagged observation beats a lost one. If location
@@ -143,7 +163,25 @@ and complete **before** the SAVED confirmation is drawn. A failed write shows a 
 NOT SAVED screen instead of a confirmation.
 
 Observations are grouped into **searches** (sessions) so separate operations do not
-mix: New / Rename / End / Delete, with confirmation on anything destructive.
+mix: New / Rename / Use (switch) / Delete, with confirmation on anything destructive.
+There is no "ended" state — creating or switching a search is enough. An `ended` field
+in older stored data is ignored.
+
+### The bearing / intensity invariant
+
+Enforced in `Store.validateObservation`, which both `addObservation` and
+`updateObservation` run before writing, so no path — capture or correction — can
+persist a contradiction:
+
+* `intensity: "none"` → `downwind_true`, `from_true`, `heading_magnetic_raw`,
+  `bearing_source`, `bearing_input_ref` all null and `declination_applied` false
+* `calm` / `light` / `moderate` / `strong` → must carry a valid bearing, with
+  `from_true` the reciprocal of `downwind_true`
+
+In the UI that means: switching an observation to no discernible wind clears its
+direction and provenance in one write; switching a no-discernible-wind observation to a
+directional intensity asks for a bearing first and applies both together; and CORRECT
+BEARING does not exist on a no-discernible-wind observation.
 
 ### Schema (`schema_version: 1`)
 
@@ -171,7 +209,7 @@ mix: New / Rename / End / Delete, with confirmation on anything destructive.
   "speed_source": "estimated",
   "gusty": false,
   "note": "",
-  "app_version": "1.1.0"
+  "app_version": "1.2.0"
 }
 ```
 
@@ -202,10 +240,10 @@ The phone heading at that moment is deliberately discarded — it did not repres
 The list is one line per observation, newest first:
 
 ```
-20:43   From 284°T   MODERATE G 7.8mph   ±7m
-20:49   From 301°T   CALM                ±5m
-20:57   No wind      —                   ±8m
-21:04   From 318°T   STRONG              ±6m
+20:43   From 284°T             MODERATE G 7.8mph   ±7m
+20:49   From 301°T             CALM                ±5m
+20:57   No discernible wind    —                   ±8m
+21:04   From 318°T             STRONG              ±6m
 ```
 
 Tap a row for every stored field, plus correction of intensity, bearing, gusty, and
@@ -215,6 +253,11 @@ Kestrel speed, a free-text note, and delete (confirmed). Correcting an entry to
 ### CSV export
 
 Two files, deliberately different in kind.
+
+`session_name` in both exports is the search's **current** name, looked up by
+`session_id`, so renaming a search shows up in the next export without rewriting a
+single stored observation. The name captured with the observation stays in the record
+and is used only if its search no longer exists.
 
 **Standard (operational)** — `CSV` on the list screen, or Settings for all searches.
 Wind direction appears **only in true degrees**, in columns that say so:
@@ -276,16 +319,20 @@ js/app.js                 capture flow and UI
 sw.js                     offline cache
 manifest.webmanifest      PWA manifest
 icons/                    PNG icons
-tools/selfcheck.js        node tools/selfcheck.js — bearing math checks, no dependencies
+tools/selfcheck.js        node tools/selfcheck.js — logic checks, no dependencies
+tools/browsercheck.js     optional UI regression pass (needs Playwright; see its header)
 tools/make_icons.py       regenerates the icons
 ```
 
 No build step, no bundler, no npm, no framework, no backend. Edit a file, reload.
 
 `node tools/selfcheck.js` verifies wraparound, circular averaging, the declination
-rule, the downwind/from convention, the Euler-to-heading math, bearing labelling, and
-the true-only export rule (61 checks). It cannot verify the physical sensor — that
-still requires the walk outside with the Silva.
+rule, the downwind/from convention, the Euler-to-heading math, bearing labelling, the
+source-specific sensor reference, the compass authority rule, the bearing/intensity
+invariant across edits, manual-entry range rejection, wording, and the true-only export
+rule (128 checks). It drives the compass with synthetic orientation events through the
+real listeners. It cannot verify the physical sensor — that still requires the walk
+outside with the Silva.
 
 ---
 
@@ -305,6 +352,13 @@ Software-verifiable, checked in a Chromium harness with faked sensors:
 - [x] "Calm" stores a directional bearing
 - [x] Estimated intensity never fabricates a numeric mph
 - [x] Kestrel speed is distinguishable from an estimate (`speed_source`)
+- [x] iOS `webkitCompassHeading` is treated as magnetic and cannot be reconfigured
+- [x] A sensor bearing is authoritative only when compass status is `ok`
+- [x] Relative-only orientation is never usable
+- [x] No discernible wind saves with no bearing; directional intensities cannot
+- [x] Edits cannot create a contradictory bearing/intensity state
+- [x] Manual 999 is rejected, 360 normalises to 000
+- [x] Renaming a search changes the next export
 - [x] Every bearing in the UI carries °M or °T; no bare bearing numbers
 - [x] Manual entry selects M or T per reading and remembers the last choice
 - [x] Standard CSV exposes wind direction only as `wind_from_deg_true` /

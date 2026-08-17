@@ -18,11 +18,31 @@ var fakeStorage = {
   removeItem: function (k) { delete mem[k]; }
 };
 
+/* A window stub that records listeners, so the compass can be driven with
+   synthetic orientation events exactly as a browser would deliver them. */
+var listeners = {};
+var fakeWindow = {
+  addEventListener: function (type, fn) {
+    (listeners[type] = listeners[type] || []).push(fn);
+  },
+  removeEventListener: function (type, fn) {
+    listeners[type] = (listeners[type] || []).filter(function (f) { return f !== fn; });
+  },
+  crypto: undefined,
+  // Present so sensors.js attaches the absolute-orientation listener, the
+  // same feature-detect a Chrome/Android browser passes.
+  ondeviceorientationabsolute: null
+};
+
 var sandbox = {
-  window: { addEventListener: function () {}, removeEventListener: function () {}, crypto: undefined },
+  window: fakeWindow,
   navigator: {},
   document: { addEventListener: function () {} },
   localStorage: fakeStorage,
+  setTimeout: function () { return 0; },
+  clearTimeout: function () {},
+  // Present but with no requestPermission: the non-iOS-gesture path.
+  DeviceOrientationEvent: function () {},
   console: console
 };
 sandbox.self = sandbox;
@@ -172,6 +192,196 @@ var noneRow = S.Store.toCSV([none]).split('\r\n')[1].split(',');
 ok('no-wind exports empty true bearings',
   noneRow[opHead.indexOf('wind_from_deg_true')] === '' &&
   noneRow[opHead.indexOf('wind_toward_deg_true')] === '');
+
+/* --- compass: the iOS path is magnetic, full stop ------------------------- */
+function fireOrientation(props) {
+  (listeners['deviceorientation'] || []).forEach(function (h) { h(props); });
+}
+function fireAbsolute(props) {
+  (listeners['deviceorientationabsolute'] || []).forEach(function (h) { h(props); });
+}
+
+S.Compass.start();                       // attaches listeners in the stub window
+
+// Configure the *fallback* reference to TRUE — iOS must ignore it entirely.
+S.Compass.setConfig(8, 'true');
+fireOrientation({ webkitCompassHeading: 97, webkitCompassAccuracy: 12, alpha: 20, beta: 5, gamma: 0 });
+var cs = S.Compass.tick();
+ok('webkitCompassHeading is detected as the iOS source', cs.source === 'ios', cs.source);
+ok('iOS heading is treated as MAGNETIC even when the fallback is set to TRUE',
+  cs.sourceRef === 'magnetic', cs.sourceRef);
+ok('iOS reference is marked as locked', cs.refLocked === true);
+near('iOS 97°M + 8°E declination = 105°T', cs.trueHeading, 105);
+near('raw magnetic value is kept for provenance', cs.smoothed, 97);
+ok('refForSource pins ios to magnetic whatever is configured',
+  S.Compass.refForSource('ios', 'true') === 'magnetic' &&
+  S.Compass.refForSource('ios', 'magnetic') === 'magnetic');
+ok('refForSource honours the setting for the absolute fallback',
+  S.Compass.refForSource('absolute', 'true') === 'true' &&
+  S.Compass.refForSource('absolute', 'magnetic') === 'magnetic');
+ok('a clean iOS fix is authoritative', S.Compass.isAuthoritative(cs) === true, cs.status);
+
+/* --- only status 'ok' may be saved as a sensor bearing --------------------- */
+fireOrientation({ webkitCompassHeading: 97, webkitCompassAccuracy: -1, alpha: 20, beta: 5, gamma: 0 });
+cs = S.Compass.tick();
+ok('uncalibrated compass (accuracy -1) is not ok', cs.status === 'unreliable', cs.status);
+ok('uncalibrated compass yields no authoritative heading',
+  S.Compass.authoritativeTrueHeading(cs) === null);
+
+fireOrientation({ webkitCompassHeading: 97, webkitCompassAccuracy: 35, alpha: 20, beta: 5, gamma: 0 });
+cs = S.Compass.tick();
+ok('poor reported accuracy is not ok', cs.status === 'unreliable', cs.status);
+ok('poor reported accuracy yields no authoritative heading',
+  S.Compass.authoritativeTrueHeading(cs) === null);
+
+fireOrientation({ webkitCompassHeading: 97, webkitCompassAccuracy: 5, alpha: 20, beta: 88, gamma: 0 });
+cs = S.Compass.tick();
+ok('excessive tilt is not ok', cs.status === 'unreliable', cs.status);
+ok('excessive tilt yields no authoritative heading',
+  S.Compass.authoritativeTrueHeading(cs) === null);
+
+['idle', 'waiting', 'unsupported', 'denied', 'unreliable', 'stale'].forEach(function (st) {
+  ok('status "' + st + '" is never authoritative',
+    S.Compass.isAuthoritative({ status: st, source: 'ios', trueHeading: 105 }) === false);
+});
+ok('status "ok" with a heading is authoritative',
+  S.Compass.isAuthoritative({ status: 'ok', source: 'ios', trueHeading: 105 }) === true);
+
+/* --- relative-only orientation stays unusable ----------------------------- */
+S.Compass.retry();
+S.Compass.setConfig(8, 'magnetic');
+fireOrientation({ alpha: 263, beta: 0, gamma: 0, absolute: false });
+cs = S.Compass.tick();
+ok('relative orientation is recognised as relative', cs.source === 'relative', cs.source);
+ok('relative orientation is never authoritative',
+  S.Compass.authoritativeTrueHeading(cs) === null && !S.Compass.isAuthoritative(cs));
+
+/* --- absolute fallback still works, honouring the setting ------------------ */
+S.Compass.retry();
+S.Compass.setConfig(8, 'magnetic');
+fireAbsolute({ alpha: 263, beta: 0, gamma: 0, absolute: true });
+cs = S.Compass.tick();
+ok('absolute orientation is usable', cs.source === 'absolute' && S.Compass.isAuthoritative(cs), cs.status);
+near('absolute 097°M + 8°E = 105°T', cs.trueHeading, 105);
+S.Compass.setConfig(8, 'true');
+cs = S.Compass.tick();
+near('absolute fallback set to TRUE applies no correction', cs.trueHeading, 97);
+S.Compass.setConfig(8, 'magnetic');
+
+/* --- the bearing / intensity invariant ------------------------------------ */
+function freshRecord(over) {
+  var r = {
+    schema_version: 1, id: 'inv-' + (freshRecord.n = (freshRecord.n || 0) + 1),
+    session_id: 'ses-inv', session_name: 'Invariant', t: '2026-08-16T20:00:00-06:00',
+    lat: null, lon: null, acc_m: null, gps_fix_t: null, gps_fix_age_s: null,
+    downwind_true: 105, from_true: 285, heading_magnetic_raw: 97,
+    declination: 8, declination_applied: true, bearing_source: 'sensor',
+    bearing_input_ref: 'magnetic', intensity: 'moderate', speed_mph: null,
+    speed_source: 'estimated', gusty: false, note: '', app_version: 'test'
+  };
+  for (var k in (over || {})) r[k] = over[k];
+  return r;
+}
+
+ok('a valid directional record passes validation',
+  S.Store.validateObservation(freshRecord()) === null);
+ok('directional record with no bearing is rejected',
+  S.Store.validateObservation(freshRecord({ downwind_true: null, from_true: null })) !== null);
+ok('from_true must be the reciprocal of downwind_true',
+  S.Store.validateObservation(freshRecord({ from_true: 100 })) !== null);
+ok('no-discernible-wind with a leftover bearing is rejected',
+  S.Store.validateObservation(freshRecord({ intensity: 'none' })) !== null);
+var cleanNone = freshRecord({ intensity: 'none' });
+var nulls = S.Store.noDirectionFields();
+for (var nk in nulls) cleanNone[nk] = nulls[nk];
+ok('no-discernible-wind with everything cleared passes',
+  S.Store.validateObservation(cleanNone) === null);
+ok('unknown intensity is rejected',
+  S.Store.validateObservation(freshRecord({ intensity: 'breezy' })) !== null);
+
+/* Storage refuses to persist a contradiction, on capture and on edit alike. */
+mem = {}; // fresh store
+var ses = S.Store.newSession('Search 1').session;
+
+var dirRec = freshRecord({ id: 'obs-dir', session_id: ses.id, session_name: 'Search 1' });
+ok('a directional observation saves', S.Store.addObservation(dirRec) === null);
+
+var noneRec = freshRecord({ id: 'obs-none', session_id: ses.id, intensity: 'none' });
+ok('addObservation refuses no-discernible-wind carrying a bearing',
+  S.Store.addObservation(noneRec) !== null);
+for (var nk2 in nulls) noneRec[nk2] = nulls[nk2];
+ok('addObservation accepts no-discernible-wind with no bearing at all',
+  S.Store.addObservation(noneRec) === null);
+
+ok('editing moderate -> none without clearing direction is refused',
+  S.Store.updateObservation('obs-dir', { intensity: 'none' }) !== null);
+var clearPatch = { intensity: 'none' };
+for (var nk3 in nulls) clearPatch[nk3] = nulls[nk3];
+ok('editing moderate -> none with the clearing patch succeeds',
+  S.Store.updateObservation('obs-dir', clearPatch) === null);
+var afterClear = S.Store.getObservation('obs-dir');
+ok('moderate -> none clears every direction and provenance field',
+  afterClear.downwind_true === null && afterClear.from_true === null &&
+  afterClear.heading_magnetic_raw === null && afterClear.bearing_source === null &&
+  afterClear.bearing_input_ref === null && afterClear.declination_applied === false);
+
+ok('editing none -> moderate without a bearing is refused',
+  S.Store.updateObservation('obs-none', { intensity: 'moderate' }) !== null);
+ok('editing none -> moderate with a bearing in the same write succeeds',
+  S.Store.updateObservation('obs-none', {
+    intensity: 'moderate', downwind_true: 284, from_true: 104,
+    heading_magnetic_raw: 276, bearing_source: 'manual',
+    bearing_input_ref: 'magnetic', declination_applied: true
+  }) === null);
+ok('attaching a bearing alone to a none observation is refused',
+  S.Store.updateObservation('obs-dir', { downwind_true: 10, from_true: 190 }) !== null);
+
+/* --- session rename shows up in the next export --------------------------- */
+mem = {};
+var ses2 = S.Store.newSession('Search 1').session;
+S.Store.addObservation(freshRecord({ id: 'obs-ren', session_id: ses2.id, session_name: 'Search 1' }));
+var csvBefore = S.Store.toCSV(S.Store.getObservations(ses2.id));
+ok('export shows the original search name', csvBefore.indexOf('Search 1') > 0);
+S.Store.renameSession(ses2.id, 'Drainage Sweep');
+var csvAfter = S.Store.toCSV(S.Store.getObservations(ses2.id));
+ok('export follows the renamed search', csvAfter.indexOf('Drainage Sweep') > 0, csvAfter.split('\r\n')[1]);
+ok('stored observation keeps its capture-time name for provenance',
+  S.Store.getObservation('obs-ren').session_name === 'Search 1');
+var orphan = freshRecord({ id: 'obs-orphan', session_id: 'gone', session_name: 'Old Search' });
+S.Store.addObservation(orphan);
+ok('an observation whose search is gone falls back to the stored name',
+  S.Store.toCSV([S.Store.getObservation('obs-orphan')]).indexOf('Old Search') > 0);
+
+/* --- wording: "No discernible wind", never "no wind" ----------------------- */
+ok('intensity label is NO DISCERNIBLE WIND', S.INTENSITY_LABEL.none === 'NO DISCERNIBLE WIND');
+['index.html', 'js/app.js', 'js/util.js', 'js/store.js', 'js/sensors.js', 'README.md'].forEach(function (f) {
+  var text = fs.readFileSync(path.join(root, f), 'utf8');
+  var hits = text.match(/\bno wind\b/gi);
+  ok('no "no wind" shorthand in ' + f, !hits, hits ? hits.join(', ') : '');
+});
+
+/* --- manual entry rejects out-of-range values ------------------------------ */
+ok('manual 0 is accepted', S.parseManualBearing('0') === 0);
+ok('manual 284 is accepted', S.parseManualBearing('284') === 284);
+ok('manual 360 normalises to 0', S.parseManualBearing('360') === 0);
+ok('manual 359.5 is accepted', S.parseManualBearing('359.5') === 359.5);
+ok('manual -1 is rejected', S.parseManualBearing('-1') === null);
+ok('manual 361 is rejected', S.parseManualBearing('361') === null);
+ok('manual 999 is rejected, not wrapped to 279', S.parseManualBearing('999') === null);
+ok('manual empty is rejected', S.parseManualBearing('') === null);
+ok('manual junk is rejected', S.parseManualBearing('28x') === null);
+ok('rejection message names the range', /000.*360/.test(S.MANUAL_RANGE_MESSAGE), S.MANUAL_RANGE_MESSAGE);
+
+/* --- manual M/T paths still do not double-correct -------------------------- */
+near('manual 276°M with +8°E becomes 284°T', S.toTrueBearing(276, 'magnetic', 8), 284);
+near('manual 284°T stays 284°T', S.toTrueBearing(284, 'true', 8), 284);
+ok('manual 360°M normalises then corrects to 008°T',
+  Math.round(S.toTrueBearing(S.parseManualBearing('360'), 'magnetic', 8)) === 8);
+
+/* --- sessions have no ended state ----------------------------------------- */
+ok('Store exposes no endSession', S.Store.endSession === undefined);
+ok('a new search carries no ended field',
+  !('ended' in S.Store.newSession('Search x').session));
 
 console.log(passes + ' passed, ' + fails + ' failed');
 process.exit(fails ? 1 : 0);

@@ -47,13 +47,21 @@
    alpha is NOT absolute. When webkitCompassHeading is present we use it
    directly and ignore the matrix.
 
-   WHICH NORTH? Neither platform documents whether the heading it reports is
-   magnetic or true. Android's fused rotation vector is referenced to
-   magnetic north; iOS's webkitCompassHeading is derived from CoreLocation
-   and has been reported both ways across versions. So we do not guess in
-   code — we default to MAGNETIC (declination applied) and expose a setting,
-   and the SENSOR PROOF screen exists so this gets settled with a real Silva
-   compass in a real field before anyone trusts a log. */
+   WHICH NORTH? This is decided per source, not globally.
+
+     ios      Apple documents webkitCompassHeading as a heading relative to
+              MAGNETIC north, so this path is fixed to magnetic and the
+              configured declination is always applied. It is deliberately
+              NOT user-configurable — see refForSource().
+     absolute The W3C spec does not say which north the earth frame uses,
+              and Android's fused rotation vector is magnetic in practice.
+              We assume magnetic, but leave the assumption configurable so
+              the fallback can be settled in the field without a code change.
+
+   Either way the raw platform number is kept for provenance and the TRUE
+   bearing is what the app treats as authoritative. The SENSOR PROOF screen
+   exists so all of this gets checked against a real Silva compass before
+   anyone trusts a log. */
 
 var Compass = (function () {
 
@@ -67,7 +75,9 @@ var Compass = (function () {
     source: null,             // 'ios' | 'absolute' | 'relative'
     raw: null,                // heading as the platform reports it, degrees
     smoothed: null,           // circular mean of raw over SMOOTH_MS
-    trueHeading: null,        // smoothed + declination (if sensor_ref magnetic)
+    sourceRef: 'magnetic',    // which north `raw`/`smoothed` are in, for THIS source
+    refLocked: false,         // true when the source fixes the reference (iOS)
+    trueHeading: null,        // smoothed normalised to true
     accuracy: null,           // iOS webkitCompassAccuracy, degrees, or null
     consistency: null,        // 0..1 vector length of the circular mean
     alpha: null, beta: null, gamma: null, absolute: null,
@@ -82,7 +92,7 @@ var Compass = (function () {
   var sawIosHeading = false;
   var listening = false;
   var declination = 8;
-  var sensorRefMagnetic = true;
+  var configuredRef = 'magnetic';   // applies to the absolute-orientation fallback only
 
   function needsPermission() {
     return typeof DeviceOrientationEvent !== 'undefined' &&
@@ -91,8 +101,32 @@ var Compass = (function () {
 
   function setConfig(dec, sensorRef) {
     declination = dec;
-    sensorRefMagnetic = (sensorRef !== 'true');
+    configuredRef = (sensorRef === 'true') ? 'true' : 'magnetic';
     recompute();
+  }
+
+  /* Which north a given source's numbers are in.
+     iOS is pinned to magnetic on Apple's documented behaviour and ignores the
+     configured value; the absolute-orientation fallback honours it. Keeping
+     this in one function is what makes the behaviour source-specific instead
+     of one global assumption applied to every platform. */
+  function refForSource(source, configured) {
+    if (source === 'ios') return 'magnetic';
+    return (configured === 'true') ? 'true' : 'magnetic';
+  }
+
+  /* A sensor heading WindMark is willing to write into a log as authoritative.
+     Anything short of a clean 'ok' status is refused — uncalibrated, poor
+     reported accuracy, excessive tilt, no smoothed heading, stale events, or
+     relative-only orientation all fall back to hand entry. */
+  function isAuthoritative(st) {
+    st = st || state;
+    return st.status === 'ok' && st.source !== 'relative' && st.trueHeading !== null;
+  }
+
+  function authoritativeTrueHeading(st) {
+    st = st || state;
+    return isAuthoritative(st) ? st.trueHeading : null;
   }
 
   /* Heading of the top edge from raw Euler angles. Returns null if the
@@ -116,6 +150,8 @@ var Compass = (function () {
 
   function recompute() {
     var now = Date.now();
+    state.sourceRef = refForSource(state.source, configuredRef);
+    state.refLocked = (state.source === 'ios');
     while (samples.length && now - samples[0].t > SMOOTH_MS) samples.shift();
 
     if (!samples.length) {
@@ -128,7 +164,7 @@ var Compass = (function () {
       if (m) {
         state.smoothed = m.deg;
         state.consistency = m.r;
-        state.trueHeading = toTrueBearing(m.deg, sensorRefMagnetic ? 'magnetic' : 'true', declination);
+        state.trueHeading = toTrueBearing(m.deg, state.sourceRef, declination);
       } else {
         state.smoothed = null;
         state.trueHeading = null;
@@ -289,6 +325,8 @@ var Compass = (function () {
   return {
     state: state, start: start, retry: retry, tick: tick,
     setConfig: setConfig, needsPermission: needsPermission,
+    refForSource: refForSource, isAuthoritative: isAuthoritative,
+    authoritativeTrueHeading: authoritativeTrueHeading,
     headingFromEuler: headingFromEuler, SMOOTH_MS: SMOOTH_MS
   };
 })();
