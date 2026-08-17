@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>WindMark</title>
+
+<!-- iOS installed-PWA hints -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="WindMark">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/windmark.css">
+</head>
+<body>
+
+<!-- =====================================================================
+     GATE — first screen. Sensors need a user gesture (iOS orientation
+     permission MUST be requested from inside a tap handler).
+     ===================================================================== -->
+<section id="screen-gate" class="screen active">
+  <div class="gate-wrap">
+    <h1 class="gate-title">WINDMARK</h1>
+    <p class="gate-sub">K9 SAR wind logger</p>
+    <p class="gate-note">
+      Point the top of the phone the way the wind is blowing.<br>
+      Tap MARK WIND, then tap an intensity.
+    </p>
+    <button id="btn-start" class="btn btn-huge btn-primary">START</button>
+    <p class="gate-fine">Grants compass + GPS. Works offline.</p>
+  </div>
+</section>
+
+<!-- =====================================================================
+     CAPTURE
+     ===================================================================== -->
+<section id="screen-capture" class="screen">
+  <div class="topbar">
+    <button class="btn btn-top" id="btn-to-sessions"><span id="top-session">Search 1</span></button>
+    <button class="btn btn-top" id="btn-to-list">LIST <span id="top-count" class="pill">0</span></button>
+    <button class="btn btn-top" id="btn-to-settings">SET</button>
+  </div>
+
+  <div class="statusline" id="gps-line">GPS starting…</div>
+  <div class="statusline warn" id="compass-line">Compass starting…</div>
+
+  <div class="bearing-block">
+    <div class="bearing-huge" id="heading-big">---°T</div>
+    <div class="bearing-label">TOP OF PHONE &nbsp;/&nbsp; WIND BLOWING TOWARD</div>
+    <div class="bearing-from" id="wind-from">WIND FROM ---°T</div>
+  </div>
+
+  <div class="dec-line" id="dec-line">DEC +8°E</div>
+
+  <div class="spacer"></div>
+
+  <button id="btn-mark" class="btn btn-mark">MARK WIND</button>
+
+  <div class="row-2">
+    <button class="btn btn-sub" id="btn-manual-entry">ENTER BEARING BY HAND</button>
+    <button class="btn btn-sub" id="btn-to-diag">SENSORS</button>
+  </div>
+</section>
+
+<!-- =====================================================================
+     INTENSITY — shown immediately after MARK WIND. Tapping an intensity
+     button commits and persists the observation.
+     ===================================================================== -->
+<section id="screen-intensity" class="screen">
+  <div class="mark-head">
+    <div class="mark-time" id="mark-time">--:--:--</div>
+    <div class="mark-bearing" id="mark-bearing">WIND FROM ---°T</div>
+    <div class="mark-sub" id="mark-sub">&nbsp;</div>
+    <div class="row-2">
+      <button class="btn btn-sub" id="btn-change-bearing">CHANGE BEARING</button>
+      <button class="btn btn-sub" id="btn-cancel-mark">CANCEL</button>
+    </div>
+  </div>
+
+  <div class="opt-row">
+    <button class="btn btn-opt" id="btn-gusty">GUSTY: OFF</button>
+    <label class="mph-wrap">
+      <span class="mph-label">KESTREL mph</span>
+      <input id="in-mph" class="mph-input" type="number" inputmode="decimal" step="0.1" min="0" max="200" placeholder="—">
+    </label>
+  </div>
+
+  <div class="intensity-grid">
+    <button class="btn btn-int int-none" data-intensity="none">NO DISCERNIBLE WIND</button>
+    <button class="btn btn-int" data-intensity="calm">CALM</button>
+    <button class="btn btn-int" data-intensity="light">LIGHT</button>
+    <button class="btn btn-int" data-intensity="moderate">MODERATE</button>
+    <button class="btn btn-int" data-intensity="strong">STRONG</button>
+  </div>
+  <div class="hint">Tap an intensity to save.</div>
+</section>
+
+<!-- =====================================================================
+     MANUAL BEARING ENTRY (Silva mirror compass fallback)
+     ===================================================================== -->
+<section id="screen-manual" class="screen">
+  <div class="topbar">
+    <button class="btn btn-top" id="btn-manual-back">BACK</button>
+    <div class="top-title">BEARING BY HAND</div>
+  </div>
+
+  <p class="manual-help">
+    Read the direction the wind is <b>blowing toward</b> (where the talc goes)
+    off your compass and enter it below.
+  </p>
+
+  <div class="manual-ref" id="manual-ref-line">Readings entered as: MAGNETIC (+8° declination will be applied)</div>
+
+  <input id="in-manual" class="manual-input" type="number" inputmode="decimal" step="1" min="0" max="360" placeholder="000">
+  <div class="manual-unit" id="manual-unit">degrees</div>
+
+  <div class="nudge-grid">
+    <button class="btn btn-nudge" data-nudge="-10">−10</button>
+    <button class="btn btn-nudge" data-nudge="-1">−1</button>
+    <button class="btn btn-nudge" data-nudge="1">+1</button>
+    <button class="btn btn-nudge" data-nudge="10">+10</button>
+  </div>
+
+  <div class="manual-preview" id="manual-preview">—</div>
+
+  <button class="btn btn-huge btn-primary" id="btn-manual-ok">USE THIS BEARING</button>
+</section>
+
+<!-- =====================================================================
+     LIST
+     ===================================================================== -->
+<section id="screen-list" class="screen">
+  <div class="topbar">
+    <button class="btn btn-top" id="btn-list-back">BACK</button>
+    <div class="top-title" id="list-title">SEARCH</div>
+    <button class="btn btn-top" id="btn-export">CSV</button>
+  </div>
+  <div id="list-body" class="list-body"></div>
+</section>
+
+<!-- =====================================================================
+     DETAIL
+     ===================================================================== -->
+<section id="screen-detail" class="screen">
+  <div class="topbar">
+    <button class="btn btn-top" id="btn-detail-back">BACK</button>
+    <div class="top-title">OBSERVATION</div>
+  </div>
+  <div id="detail-body" class="detail-body"></div>
+</section>
+
+<!-- =====================================================================
+     SESSIONS
+     ===================================================================== -->
+<section id="screen-sessions" class="screen">
+  <div class="topbar">
+    <button class="btn btn-top" id="btn-sessions-back">BACK</button>
+    <div class="top-title">SEARCHES</div>
+  </div>
+  <button class="btn btn-wide btn-primary" id="btn-new-session">NEW SEARCH</button>
+  <div id="sessions-body" class="list-body"></div>
+</section>
+
+<!-- =====================================================================
+     SETTINGS
+     ===================================================================== -->
+<section id="screen-settings" class="screen">
+  <div class="topbar">
+    <button class="btn btn-top" id="btn-settings-back">BACK</button>
+    <div class="top-title">SETTINGS</div>
+  </div>
+
+  <div class="set-group">
+    <div class="set-label">DECLINATION (east positive)</div>
+    <div class="dec-row">
+      <button class="btn btn-nudge" data-dec="-1">−1</button>
+      <input id="in-dec" class="dec-input" type="number" inputmode="decimal" step="0.5" min="-40" max="40">
+      <button class="btn btn-nudge" data-dec="1">+1</button>
+    </div>
+    <div class="set-help">true = magnetic + declination. Set from your map / NOAA before the search.</div>
+  </div>
+
+  <div class="set-group">
+    <div class="set-label">MANUAL COMPASS READINGS</div>
+    <div class="seg" id="seg-manual-ref">
+      <button class="btn btn-seg" data-manualref="magnetic">MAGNETIC</button>
+      <button class="btn btn-seg" data-manualref="true">TRUE</button>
+    </div>
+    <div class="set-help">If your Silva is declination-adjusted, choose TRUE and no correction is applied.</div>
+  </div>
+
+  <div class="set-group">
+    <div class="set-label">PHONE SENSOR HEADING IS</div>
+    <div class="seg" id="seg-sensor-ref">
+      <button class="btn btn-seg" data-sensorref="magnetic">MAGNETIC</button>
+      <button class="btn btn-seg" data-sensorref="true">TRUE</button>
+    </div>
+    <div class="set-help">
+      Browsers do not say which north they report. Default MAGNETIC (declination applied).
+      Verify against your Silva on the SENSORS screen; if the phone already matches true
+      bearings with declination applied, leave it. If it reads high by the declination,
+      switch to TRUE.
+    </div>
+  </div>
+
+  <div class="set-group">
+    <div class="set-label">CONFIRMATION</div>
+    <div class="seg">
+      <button class="btn btn-seg" id="btn-sound">SOUND</button>
+      <button class="btn btn-seg" id="btn-vibe">VIBRATE</button>
+    </div>
+    <div class="set-help">Visual confirmation is always shown. Sound/vibration are extras.</div>
+  </div>
+
+  <div class="set-group">
+    <div class="set-label">DATA</div>
+    <button class="btn btn-wide" id="btn-settings-export">EXPORT CSV (THIS SEARCH)</button>
+    <button class="btn btn-wide" id="btn-export-all">EXPORT CSV (ALL SEARCHES)</button>
+    <div class="set-help" id="storage-info">—</div>
+  </div>
+
+  <div class="set-group">
+    <div class="set-label">ABOUT</div>
+    <div class="set-help" id="about-info">—</div>
+  </div>
+</section>
+
+<!-- =====================================================================
+     DIAGNOSTICS (Phase 0 sensor proof)
+     ===================================================================== -->
+<section id="screen-diag" class="screen">
+  <div class="topbar">
+    <button class="btn btn-top" id="btn-diag-back">BACK</button>
+    <div class="top-title">SENSOR PROOF</div>
+    <button class="btn btn-top" id="btn-diag-recheck">RETRY</button>
+  </div>
+  <div class="diag-big" id="diag-heading">---°T</div>
+  <div class="diag-sub">computed true heading of top of phone</div>
+  <pre id="diag-body" class="diag-body">…</pre>
+  <p class="set-help">
+    Field check: hold the phone flat, top pointed along a Silva sighting.
+    Compare on at least 8 headings, including 358°, 359°, 0°, 1°, 2°.
+    Agreement should be within about ±10°.
+  </p>
+</section>
+
+<!-- =====================================================================
+     SAVE CONFIRMATION OVERLAY
+     ===================================================================== -->
+<div id="overlay" class="overlay">
+  <div class="overlay-inner">
+    <div class="ov-title" id="ov-title">SAVED</div>
+    <div class="ov-main" id="ov-main">FROM 284°T · MODERATE</div>
+    <div class="ov-sub" id="ov-sub">&nbsp;</div>
+    <button class="btn btn-wide btn-undo" id="btn-undo">UNDO</button>
+    <button class="btn btn-wide" id="btn-ov-done">DONE</button>
+  </div>
+</div>
+
+<script src="js/util.js"></script>
+<script src="js/store.js"></script>
+<script src="js/sensors.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
