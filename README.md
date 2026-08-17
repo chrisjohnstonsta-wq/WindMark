@@ -215,7 +215,7 @@ BEARING does not exist on a no-discernible-wind observation.
   "speed_source": "estimated",
   "gusty": false,
   "note": "",
-  "app_version": "1.4.0"
+  "app_version": "1.4.1"
 }
 ```
 
@@ -312,7 +312,7 @@ line:
 
 ```
 OFFLINE READY ✓
-WindMark v1.4.0 cached locally
+WindMark v1.4.1 cached locally
 ```
 
 or
@@ -335,7 +335,7 @@ all four of:
 the service worker (`importScripts`), so the check and the cache can never disagree
 about what "cached" means. Because the cache name carries the version, a half-installed
 update cannot masquerade as ready: v1.5.0 asks for the v1.5.0 cache and gets `NOT READY`
-until that cache is complete, while v1.4.0 keeps working from its own.
+until that cache is complete, while v1.4.1 keeps working from its own.
 
 ### PRE-SEARCH CHECK
 

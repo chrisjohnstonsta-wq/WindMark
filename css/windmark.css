@@ -49,12 +49,27 @@ html, body {
 }
 
 body {
+  /* The app occupies the viewport exactly. The safe-area insets have to come
+     OUT of that height, not be added to it: with box-sizing: border-box the
+     padding sits inside the 100dvh, so nothing lands under the notch or the
+     Home indicator and nothing is pushed past the bottom of the screen.
+     100dvh tracks Safari's dynamic toolbars; the 100vh line above it is the
+     fallback for iOS versions without dvh. */
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   padding: env(safe-area-inset-top) env(safe-area-inset-right)
            env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
-.screen { display: none; padding: 8px 10px 24px; min-height: 100vh; }
-.screen.active { display: flex; flex-direction: column; }
+/* Each screen fills the body exactly and scrolls within itself when its own
+   content is genuinely taller (Settings, Sensor Proof). Capture never needs
+   to: everything it shows fits. */
+.screen { display: none; padding: 8px 10px 8px; height: 100%; }
+.screen.active {
+  display: flex; flex-direction: column;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
 
 /* ---------- buttons ---------------------------------------------------- */
 
@@ -133,7 +148,10 @@ body {
   border-radius: 999px; padding: 1px 8px; font-size: 13px; margin-left: 4px;
 }
 
-.spacer { flex: 1 1 auto; min-height: 8px; }
+/* Absorbs whatever room is left so MARK WIND stays in the thumb zone at the
+   bottom, and collapses to nothing when a long compass warning needs the
+   space. It never forces height of its own. */
+.spacer { flex: 1 1 auto; min-height: 0; }
 .row-2 { display: flex; gap: 8px; margin-top: 10px; }
 .row-2 .btn { flex: 1 1 0; }
 

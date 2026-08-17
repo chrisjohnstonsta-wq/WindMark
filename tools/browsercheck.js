@@ -192,6 +192,106 @@ const CHROMIUM = process.env.CHROMIUM_PATH || undefined;
   ok('stale mark still offers no-discernible-wind', (await page.textContent('#mark-bearing')) === 'NO USABLE BEARING');
   await page.click('#btn-cancel-mark');
 
+  // ---- 10. the capture screen fits one portrait viewport, no scrolling ----
+  // Chromium reports env(safe-area-inset-*) as 0, so the insets are simulated
+  // with a padding override: that keeps the rule under test (height 100dvh +
+  // border-box) and proves the padding comes out of the viewport height
+  // rather than being added to it.
+  const SIZES = [
+    { w: 390, h: 844, label: 'iPhone 13/14', insets: [47, 34] },
+    { w: 393, h: 852, label: 'iPhone 15/16', insets: [59, 34] },
+    { w: 430, h: 932, label: 'iPhone Pro Max', insets: [59, 34] },
+    { w: 375, h: 667, label: 'iPhone SE', insets: [20, 0] },
+    { w: 360, h: 640, label: 'small Android', insets: [24, 0] }
+  ];
+
+  await page.click('#btn-cancel-mark').catch(() => {});
+  for (const s of SIZES) {
+    await page.setViewportSize({ width: s.w, height: s.h });
+    await page.addStyleTag({ content:
+      `body { padding: ${s.insets[0]}px 0 ${s.insets[1]}px 0 !important; }` });
+    await page.waitForTimeout(250);
+
+    const m = await page.evaluate(() => {
+      const cap = document.getElementById('screen-capture');
+      const box = (id) => document.getElementById(id).getBoundingClientRect();
+      return {
+        innerH: window.innerHeight,
+        docScroll: document.documentElement.scrollHeight,
+        bodyH: document.body.getBoundingClientRect().height,
+        screenScroll: cap.scrollHeight,
+        screenClient: cap.clientHeight,
+        mark: box('btn-mark'),
+        manual: box('btn-manual-entry'),
+        sensors: box('btn-to-diag'),
+        topbar: box('btn-to-list'),
+        bearingFont: parseFloat(getComputedStyle(document.getElementById('heading-big')).fontSize),
+        windFrom: box('wind-from'),
+        dec: box('dec-line')
+      };
+    });
+
+    ok(`${s.label}: document does not scroll`, m.docScroll <= m.innerH + 1,
+      `${m.docScroll} > ${m.innerH}`);
+    ok(`${s.label}: capture screen does not scroll`, m.screenScroll <= m.screenClient + 1,
+      `${m.screenScroll} > ${m.screenClient}`);
+    ok(`${s.label}: body fits the viewport exactly`, Math.abs(m.bodyH - m.innerH) <= 1,
+      `${m.bodyH} vs ${m.innerH}`);
+    ok(`${s.label}: top bar is below the notch`, m.topbar.top >= s.insets[0] - 1,
+      String(Math.round(m.topbar.top)));
+    ok(`${s.label}: MARK WIND fully visible`, m.mark.bottom <= m.innerH + 1 && m.mark.top >= 0,
+      `${Math.round(m.mark.top)}..${Math.round(m.mark.bottom)} of ${m.innerH}`);
+    ok(`${s.label}: ENTER BEARING BY HAND fully visible`, m.manual.bottom <= m.innerH + 1,
+      `${Math.round(m.manual.bottom)} of ${m.innerH}`);
+    ok(`${s.label}: SENSORS fully visible`, m.sensors.bottom <= m.innerH + 1,
+      `${Math.round(m.sensors.bottom)} of ${m.innerH}`);
+    ok(`${s.label}: nothing sits under the Home indicator`,
+      m.sensors.bottom <= m.innerH - s.insets[1] + 1,
+      `${Math.round(m.sensors.bottom)} vs ${m.innerH - s.insets[1]}`);
+    ok(`${s.label}: WIND FROM and declination visible`,
+      m.windFrom.bottom <= m.innerH && m.dec.bottom <= m.innerH);
+    ok(`${s.label}: MARK WIND stays dominant`, m.mark.height >= 110,
+      String(Math.round(m.mark.height)));
+    ok(`${s.label}: secondary controls stay glove-sized`,
+      m.manual.height >= 60 && m.sensors.height >= 60,
+      `${Math.round(m.manual.height)} / ${Math.round(m.sensors.height)}`);
+    ok(`${s.label}: bearing stays large`, m.bearingFont >= 60, String(Math.round(m.bearingFont)));
+  }
+
+  // A long compass warning wraps to three lines: still no scrolling.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addStyleTag({ content: 'body { padding: 47px 0 34px 0 !important; }' });
+  await page.evaluate(() => {
+    document.getElementById('compass-line').textContent =
+      'No usable heading right now. Move the phone slightly, or use bearing by hand.';
+  });
+  await page.waitForTimeout(200);
+  const tight = await page.evaluate(() => ({
+    innerH: window.innerHeight,
+    docScroll: document.documentElement.scrollHeight,
+    sensors: document.getElementById('btn-to-diag').getBoundingClientRect().bottom
+  }));
+  ok('a three-line compass warning still fits', tight.docScroll <= tight.innerH + 1,
+    `${tight.docScroll} > ${tight.innerH}`);
+  ok('SENSORS still visible with the warning shown', tight.sensors <= tight.innerH + 1);
+
+  // Long screens must still reach their own bottom by scrolling inside.
+  await page.click('#btn-to-settings');
+  await page.waitForTimeout(300);
+  const settings = await page.evaluate(() => {
+    const el = document.getElementById('screen-settings');
+    el.scrollTop = el.scrollHeight;
+    return {
+      scrollable: el.scrollHeight > el.clientHeight,
+      reachedBottom: Math.abs(el.scrollTop + el.clientHeight - el.scrollHeight) <= 2,
+      aboutVisible: document.getElementById('about-info').getBoundingClientRect().bottom <= window.innerHeight + 1
+    };
+  });
+  ok('Settings scrolls inside its own screen', settings.scrollable);
+  ok('Settings can be scrolled to the very bottom', settings.reachedBottom);
+  ok('the last Settings line is reachable, not clipped', settings.aboutVisible);
+  await page.click('#btn-settings-back');
+
   console.log(pass + ' passed, ' + fail + ' failed');
   console.log('page errors:', errors.length ? errors : 'none');
   await browser.close();
