@@ -12,6 +12,7 @@ var Store = (function () {
   var K_SESSIONS = 'windmark.v1.sessions';
   var K_ACTIVE = 'windmark.v1.active_session';
   var K_SETTINGS = 'windmark.v1.settings';
+  var K_FOLDERS = 'windmark.v1.folders';
 
   var DEFAULT_SETTINGS = {
     declination: 8,            // degrees, east positive (field-test default)
@@ -64,20 +65,115 @@ var Store = (function () {
 
   function saveSettings(s) { return writeJSON(K_SETTINGS, s); }
 
+  /* ---------- folders -----------------------------------------------------
+
+     One optional level above searches, and one only:
+
+       Folder -> Search -> Observations
+
+     A search carries folder_id, never a folder name, so renaming a folder or
+     moving a search between folders touches no observation. A search with no
+     folder_id — including every search written by an older version — is
+     unfiled, which is a normal state and not an error. */
+
+  function getFolders() {
+    var list = readJSON(K_FOLDERS, []);
+    return Array.isArray(list) ? list : [];
+  }
+
+  function saveFolders(list) { return writeJSON(K_FOLDERS, list); }
+
+  function getFolder(id) {
+    if (!id) return null;
+    var list = getFolders();
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
+  }
+
+  /* '' for unfiled, and also for a folder that no longer exists — a dangling
+     folder_id reads as unfiled rather than breaking a listing or an export. */
+  function folderName(id) {
+    var f = getFolder(id);
+    return f ? f.name : '';
+  }
+
+  function newFolder(name) {
+    var clean = String(name === null || name === undefined ? '' : name).trim();
+    if (!clean) return { error: 'A folder needs a name.' };
+    var list = getFolders();
+    var f = { id: uuid(), name: clean, created: isoLocal(new Date()) };
+    list.push(f);
+    var err = saveFolders(list);
+    return err ? { error: err } : { folder: f };
+  }
+
+  function renameFolder(id, name) {
+    var clean = String(name === null || name === undefined ? '' : name).trim();
+    if (!clean) return 'A folder needs a name.';
+    var list = getFolders();
+    var found = false;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id) { list[i].name = clean; found = true; }
+    }
+    if (!found) return 'Folder not found.';
+    return saveFolders(list);
+  }
+
+  function sessionsInFolder(id) {
+    return getSessions().filter(function (s) { return (s.folder_id || null) === (id || null); });
+  }
+
+  /* A folder holding searches is never deleted out from under them: the
+     handler moves or deletes those searches first. Cascading deletion here
+     would be the easiest way in the whole app to lose a day's work. */
+  function deleteFolder(id) {
+    var n = sessionsInFolder(id).length;
+    if (n) return folderNotEmptyMessage(folderName(id), n);
+    var list = getFolders().filter(function (f) { return f.id !== id; });
+    return saveFolders(list);
+  }
+
+  function moveSession(sessionId, folderId) {
+    var list = getSessions();
+    var found = false;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === sessionId) { list[i].folder_id = folderId || null; found = true; }
+    }
+    if (!found) return 'Search not found.';
+    return saveSessions(list);
+  }
+
+  /* Folders first in creation order, unfiled searches last under their own
+     heading. Returns [{folder|null, sessions:[]}]. */
+  function groupedSessions() {
+    var groups = getFolders().map(function (f) {
+      return { folder: f, sessions: sessionsInFolder(f.id) };
+    });
+    groups.push({ folder: null, sessions: sessionsInFolder(null) });
+    return groups;
+  }
+
   /* ---------- sessions -------------------------------------------------- */
 
   function getSessions() {
     var list = readJSON(K_SESSIONS, []);
-    return Array.isArray(list) ? list : [];
+    if (!Array.isArray(list)) return [];
+    // Tolerant, in memory only: a search written before folders existed has
+    // no folder_id and is simply unfiled. Nothing is rewritten on disk for it.
+    return list.map(function (s) {
+      if (s && s.folder_id === undefined) s.folder_id = null;
+      return s;
+    });
   }
 
   function saveSessions(list) { return writeJSON(K_SESSIONS, list); }
 
-  function newSession(name) {
+  function newSession(name, folderId) {
     var list = getSessions();
     var s = {
       id: uuid(),
       name: name || ('Search ' + (list.length + 1)),
+      folder_id: folderId || null,
       started: isoLocal(new Date())
       // No 'ended' state: switching or creating a search is enough. An
       // `ended` field on older stored data is simply ignored.
@@ -116,6 +212,54 @@ var Store = (function () {
     var e1 = writeJSON(K_OBS, obs);
     if (e1) return e1;
     return saveSessions(list);
+  }
+
+  /* Empties a search without deleting it: the name, the folder assignment,
+     and the search itself all survive, so it can be reused immediately. */
+  function clearObservations(id) {
+    var obs = getAllObservations().filter(function (o) { return o.session_id !== id; });
+    return writeJSON(K_OBS, obs);
+  }
+
+  function countObservations(id) {
+    return getAllObservations().filter(function (o) { return o.session_id === id; }).length;
+  }
+
+  /* ---------- wording for destructive actions -----------------------------
+
+     Every one of these takes two confirmations, and the first names what is
+     about to go: the search, and exactly how many observations. Kept here as
+     pure functions so the exact wording is testable, and so no caller can
+     invent a vaguer version of the question. */
+
+  function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+  function clearPrompts(name, n) {
+    return [
+      'Clear all ' + plural(n, 'observation') + ' from "' + name + '"?\n' +
+        'The search itself will remain.',
+      'This cannot be undone.\nReally clear ' + plural(n, 'observation') + '?'
+    ];
+  }
+
+  function deleteSearchPrompts(name, n) {
+    return [
+      'Delete "' + name + '" and its ' + plural(n, 'observation') + '?',
+      'This permanently deletes the search and all ' + plural(n, 'observation') + '.\n' +
+        'Really delete?'
+    ];
+  }
+
+  function deleteFolderPrompts(name) {
+    return [
+      'Delete the folder "' + name + '"?',
+      'This cannot be undone.\nReally delete the folder "' + name + '"?'
+    ];
+  }
+
+  function folderNotEmptyMessage(name, n) {
+    return 'This folder contains ' + plural(n, 'search').replace('searchs', 'searches') + '.\n' +
+      'Move or delete those searches before deleting the folder.';
   }
 
   /* ---------- the bearing / intensity invariant ---------------------------
@@ -276,7 +420,11 @@ var Store = (function () {
     ['schema_version', function (o) { return o.schema_version; }],
     ['id', function (o) { return o.id; }],
     ['session_id', function (o) { return o.session_id; }],
-    ['session_name', function (o) { return o.session_name; }],
+    // Organisational context, resolved at export time from the IDs — so a
+    // renamed folder or search shows up in the next export without a single
+    // observation being rewritten. Empty folder_name means unfiled.
+    ['folder_name', function (o, ctx) { return ctx.folderFor(o.session_id); }],
+    ['search_name', function (o, ctx) { return ctx.searchFor(o); }],
     ['t', function (o) { return o.t; }],
     ['lat', function (o) { return o.lat; }],
     ['lon', function (o) { return o.lon; }],
@@ -296,6 +444,9 @@ var Store = (function () {
   ];
 
   var PROVENANCE_FIELDS = OPERATIONAL_FIELDS.concat([
+    // The name the search had when this observation was captured. Kept for
+    // audit only; the operational file always carries the current name.
+    ['search_name_at_capture', function (o) { return o.session_name; }],
     ['raw_input_deg_magnetic', function (o) { return o.heading_magnetic_raw; }],
     ['input_reference', function (o) { return o.bearing_input_ref; }],
     ['declination_deg_east', function (o) { return o.declination; }],
@@ -309,20 +460,33 @@ var Store = (function () {
     return s;
   }
 
-  function buildCSV(observations, fields) {
-    var nameById = {};
-    getSessions().forEach(function (s) { nameById[s.id] = s.name; });
+  /* Resolves organisational names once per export, from IDs. Renaming a
+     search or a folder shows up in the next export; the name stored with the
+     observation is only a fallback for a search that no longer exists. */
+  function exportContext() {
+    var sessionById = {};
+    getSessions().forEach(function (s) { sessionById[s.id] = s; });
+    var folderNameById = {};
+    getFolders().forEach(function (f) { folderNameById[f.id] = f.name; });
 
+    return {
+      searchFor: function (o) {
+        var s = sessionById[o.session_id];
+        return (s && s.name) || o.session_name || '';
+      },
+      folderFor: function (sessionId) {
+        var s = sessionById[sessionId];
+        if (!s || !s.folder_id) return '';        // unfiled, or search is gone
+        return folderNameById[s.folder_id] || ''; // dangling id reads as unfiled
+      }
+    };
+  }
+
+  function buildCSV(observations, fields) {
+    var ctx = exportContext();
     var lines = [fields.map(function (f) { return f[0]; }).join(',')];
     observations.forEach(function (o) {
-      lines.push(fields.map(function (f) {
-        var v = f[1](o);
-        // Renaming a search must show up in the next export, so the current
-        // name wins; the name stored at capture time is only a fallback for
-        // observations whose search no longer exists.
-        if (f[0] === 'session_name') v = nameById[o.session_id] || v || '';
-        return csvCell(v);
-      }).join(','));
+      lines.push(fields.map(function (f) { return csvCell(f[1](o, ctx)); }).join(','));
     });
     return lines.join('\r\n') + '\r\n';
   }
@@ -363,6 +527,13 @@ var Store = (function () {
     getSessions: getSessions, newSession: newSession,
     getActiveSession: getActiveSession, setActiveSession: setActiveSession,
     renameSession: renameSession, deleteSession: deleteSession,
+    clearObservations: clearObservations, countObservations: countObservations,
+    getFolders: getFolders, getFolder: getFolder, folderName: folderName,
+    newFolder: newFolder, renameFolder: renameFolder, deleteFolder: deleteFolder,
+    sessionsInFolder: sessionsInFolder, moveSession: moveSession,
+    groupedSessions: groupedSessions,
+    clearPrompts: clearPrompts, deleteSearchPrompts: deleteSearchPrompts,
+    deleteFolderPrompts: deleteFolderPrompts, folderNotEmptyMessage: folderNotEmptyMessage,
     getAllObservations: getAllObservations, getObservations: getObservations,
     getObservation: getObservation, addObservation: addObservation,
     updateObservation: updateObservation, deleteObservation: deleteObservation,

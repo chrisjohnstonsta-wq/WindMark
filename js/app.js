@@ -22,6 +22,8 @@ var App = (function () {
   var manualRef = 'magnetic'; // reference for the bearing being entered RIGHT NOW;
                               // seeded from the last choice, changeable per entry
   var pendingEditIntensity = null; // intensity waiting on a bearing during a correction
+  var manageSessionId = null;      // search open on the search-management screen
+  var manageFolderId = null;       // folder open on the folder-management screen
   var lastSavedId = null;
   var overlayTimer = null;
   var uiTimer = null;
@@ -46,6 +48,8 @@ var App = (function () {
     if (name === 'capture') refreshCount();
     if (name === 'list') renderList();
     if (name === 'sessions') renderSessions();
+    if (name === 'search') renderSearchManage();
+    if (name === 'folder') renderFolderManage();
     if (name === 'settings') renderSettings();
     if (name === 'detail') renderDetail();
   }
@@ -647,59 +651,227 @@ var App = (function () {
 
   /* ---------- sessions ---------------------------------------------------------- */
 
+  /* Grouped list: each folder, then UNFILED. A row shows only what the
+     handler needs to pick one — name, observation count, and which search is
+     active. Everything else lives one tap deeper so the list stays legible
+     with a dozen searches in it. */
   function renderSessions() {
-    var list = Store.getSessions().slice().reverse();
+    var groups = Store.groupedSessions();
     var all = Store.getAllObservations();
+    var countOf = {};
+    all.forEach(function (o) { countOf[o.session_id] = (countOf[o.session_id] || 0) + 1; });
+
     var html = '';
-    list.forEach(function (s) {
-      var n = all.filter(function (o) { return o.session_id === s.id; }).length;
-      var active = s.id === session.id;
-      html += '<div class="sess' + (active ? ' active' : '') + '">' +
-        '<div class="sess-name">' + esc(s.name) + (active ? ' <span class="pill">ACTIVE</span>' : '') + '</div>' +
-        '<div class="sess-meta">' + esc(s.started) + ' · ' + n + ' obs</div>' +
-        '<div class="sess-actions">' +
-        (active ? '' : '<button class="btn btn-sub" data-use="' + esc(s.id) + '">USE</button>') +
-        '<button class="btn btn-sub" data-rename="' + esc(s.id) + '">RENAME</button>' +
-        '<button class="btn btn-sub btn-danger" data-del="' + esc(s.id) + '">DELETE</button>' +
-        '</div></div>';
+    groups.forEach(function (g) {
+      var isUnfiled = !g.folder;
+      if (isUnfiled && !g.sessions.length && groups.length > 1) return;  // nothing unfiled
+
+      html += '<div class="group-head">' +
+        '<span class="group-name">' + (isUnfiled ? 'UNFILED' : esc(g.folder.name)) + '</span>' +
+        '<span class="group-count">' + g.sessions.length +
+          (g.sessions.length === 1 ? ' search' : ' searches') + '</span>' +
+        (isUnfiled ? '' :
+          '<button class="btn btn-sub group-manage" data-folder="' + esc(g.folder.id) + '">FOLDER</button>') +
+        '</div>';
+
+      if (!g.sessions.length) {
+        html += '<div class="group-empty">empty</div>';
+        return;
+      }
+      g.sessions.slice().reverse().forEach(function (ss) {
+        var n = countOf[ss.id] || 0;
+        html += '<button class="row sess-row" data-session="' + esc(ss.id) + '">' +
+          '<span class="c-dir">' + esc(ss.name) +
+            (ss.id === session.id ? ' <span class="pill">ACTIVE</span>' : '') + '</span>' +
+          '<span class="c-int">' + n + (n === 1 ? ' obs' : ' obs') + '</span>' +
+          '</button>';
+      });
     });
     el('sessions-body').innerHTML = html;
 
-    function bind(attr, fn) {
-      var nodes = el('sessions-body').querySelectorAll('[data-' + attr + ']');
-      for (var i = 0; i < nodes.length; i++) {
-        nodes[i].addEventListener('click', function () { fn(this.getAttribute('data-' + attr)); });
-      }
+    var rows = el('sessions-body').querySelectorAll('[data-session]');
+    for (var i = 0; i < rows.length; i++) {
+      rows[i].addEventListener('click', function () {
+        manageSessionId = this.getAttribute('data-session');
+        show('search');
+      });
     }
-    bind('use', function (id) {
-      Store.setActiveSession(id);
-      session = Store.getActiveSession();
-      refreshCount();
-      renderSessions(); updateCapture();
+    var fbtns = el('sessions-body').querySelectorAll('[data-folder]');
+    for (var j = 0; j < fbtns.length; j++) {
+      fbtns[j].addEventListener('click', function (e) {
+        e.stopPropagation();
+        manageFolderId = this.getAttribute('data-folder');
+        show('folder');
+      });
+    }
+  }
+
+  /* ---------- one search ------------------------------------------------- */
+
+  function renderSearchManage() {
+    var body = el('search-body');
+    var ses = Store.getSessions().filter(function (x) { return x.id === manageSessionId; })[0];
+    if (!ses) { body.innerHTML = '<div class="empty">Search not found.</div>'; return; }
+
+    var n = Store.countObservations(ses.id);
+    var fname = Store.folderName(ses.folder_id);
+    var isActive = (ses.id === session.id);
+
+    var html = '<div class="detail-head">' + esc(ses.name) + '</div>' +
+      '<div class="detail-sub">' + (fname ? esc(fname) : 'UNFILED') + ' · ' +
+      n + (n === 1 ? ' observation' : ' observations') +
+      (isActive ? ' · ACTIVE' : '') + '</div>';
+
+    html += '<div class="dl"><span class="dk">started</span><span class="dv">' + esc(ses.started || '—') + '</span></div>';
+
+    if (!isActive) html += '<button class="btn btn-wide btn-primary" id="btn-use-search">USE THIS SEARCH</button>';
+    html += '<button class="btn btn-wide" id="btn-rename-search">RENAME SEARCH</button>';
+
+    html += '<div class="set-label">FOLDER</div><div class="fix-grid">';
+    html += '<button class="btn btn-fix' + (ses.folder_id ? '' : ' on') + '" data-move="">UNFILED</button>';
+    Store.getFolders().forEach(function (f) {
+      html += '<button class="btn btn-fix' + (ses.folder_id === f.id ? ' on' : '') +
+        '" data-move="' + esc(f.id) + '">' + esc(f.name) + '</button>';
     });
-    bind('rename', function (id) {
-      var cur = Store.getSessions().filter(function (s) { return s.id === id; })[0];
-      var name = prompt('Search name:', cur ? cur.name : '');
+    html += '</div>';
+    html += '<button class="btn btn-wide" id="btn-move-new-folder">MOVE TO A NEW FOLDER…</button>';
+
+    // An empty search has nothing to clear, so the control is not offered.
+    if (n > 0) {
+      html += '<button class="btn btn-wide btn-danger" id="btn-clear-obs">CLEAR OBSERVATIONS (' + n + ')</button>';
+    }
+    html += '<button class="btn btn-wide btn-danger" id="btn-delete-search">DELETE SEARCH</button>';
+    body.innerHTML = html;
+
+    if (el('btn-use-search')) {
+      el('btn-use-search').addEventListener('click', function () {
+        Store.setActiveSession(ses.id);
+        session = Store.getActiveSession();
+        refreshCount();
+        renderSearchManage();
+        updateCapture();
+      });
+    }
+
+    el('btn-rename-search').addEventListener('click', function () {
+      var name = prompt('Search name:', ses.name);
       if (name === null) return;
       name = name.trim();
       if (!name) return;
-      var err = Store.renameSession(id, name);
-      if (err) alert(err);
-      // Exports read the current name by session_id, so a rename shows up in
-      // the next CSV without rewriting any stored observation.
-      session = Store.getActiveSession();
-      renderSessions(); updateCapture();
-    });
-    bind('del', function (id) {
-      var cur = Store.getSessions().filter(function (s) { return s.id === id; })[0];
-      var n = Store.getObservations(id).length;
-      if (!confirm('DELETE "' + (cur ? cur.name : '') + '" and its ' + n + ' observation(s)?\n\nThis cannot be undone. Export CSV first if you need the data.')) return;
-      if (!confirm('Really delete? Last chance.')) return;
-      var err = Store.deleteSession(id);
+      var err = Store.renameSession(ses.id, name);
       if (err) { alert(err); return; }
       session = Store.getActiveSession();
+      renderSearchManage();
+      updateCapture();
+    });
+
+    var moves = body.querySelectorAll('[data-move]');
+    for (var i = 0; i < moves.length; i++) {
+      moves[i].addEventListener('click', function () {
+        // Moving a search changes one field on the search. No observation is
+        // touched, and none needs to be.
+        var err = Store.moveSession(ses.id, this.getAttribute('data-move') || null);
+        if (err) { alert(err); return; }
+        renderSearchManage();
+      });
+    }
+
+    el('btn-move-new-folder').addEventListener('click', function () {
+      var name = prompt('New folder name:', '');
+      if (name === null) return;
+      var r = Store.newFolder(name);
+      if (r.error) { alert(r.error); return; }
+      var err = Store.moveSession(ses.id, r.folder.id);
+      if (err) alert(err);
+      renderSearchManage();
+    });
+
+    if (el('btn-clear-obs')) {
+      el('btn-clear-obs').addEventListener('click', function () {
+        // Two confirmations, the first naming the search and the exact count.
+        var count = Store.countObservations(ses.id);
+        var p = Store.clearPrompts(ses.name, count);
+        if (!confirm(p[0])) return;
+        if (!confirm(p[1])) return;
+        var err = Store.clearObservations(ses.id);
+        if (err) { alert(err); return; }
+        refreshCount();
+        renderSearchManage();
+        updateCapture();
+      });
+    }
+
+    el('btn-delete-search').addEventListener('click', function () {
+      var count = Store.countObservations(ses.id);
+      var p = Store.deleteSearchPrompts(ses.name, count);
+      if (!confirm(p[0])) return;
+      if (!confirm(p[1])) return;
+      var err = Store.deleteSession(ses.id);
+      if (err) { alert(err); return; }
+      // Never leave the app without a valid active search: getActiveSession
+      // falls back to the newest, or creates one.
+      session = Store.getActiveSession();
+      manageSessionId = null;
       refreshCount();
-      renderSessions(); updateCapture();
+      updateCapture();
+      show('sessions');
+    });
+  }
+
+  /* ---------- one folder ------------------------------------------------- */
+
+  function renderFolderManage() {
+    var body = el('folder-body');
+    var f = Store.getFolder(manageFolderId);
+    if (!f) { body.innerHTML = '<div class="empty">Folder not found.</div>'; return; }
+
+    var inside = Store.sessionsInFolder(f.id);
+    var html = '<div class="detail-head">' + esc(f.name) + '</div>' +
+      '<div class="detail-sub">' + inside.length +
+      (inside.length === 1 ? ' search' : ' searches') + '</div>';
+
+    inside.slice().reverse().forEach(function (ss) {
+      var n = Store.countObservations(ss.id);
+      html += '<button class="row sess-row" data-session="' + esc(ss.id) + '">' +
+        '<span class="c-dir">' + esc(ss.name) + '</span>' +
+        '<span class="c-int">' + n + ' obs</span></button>';
+    });
+
+    html += '<button class="btn btn-wide" id="btn-rename-folder">RENAME FOLDER</button>';
+    html += '<button class="btn btn-wide btn-danger" id="btn-delete-folder">DELETE FOLDER</button>';
+    if (inside.length) {
+      html += '<div class="set-help">A folder holding searches cannot be deleted. ' +
+        'Move or delete its searches first — open one and change its folder.</div>';
+    }
+    body.innerHTML = html;
+
+    var rows = body.querySelectorAll('[data-session]');
+    for (var i = 0; i < rows.length; i++) {
+      rows[i].addEventListener('click', function () {
+        manageSessionId = this.getAttribute('data-session');
+        show('search');
+      });
+    }
+
+    el('btn-rename-folder').addEventListener('click', function () {
+      var name = prompt('Folder name:', f.name);
+      if (name === null) return;
+      // Folders are referenced by id, so this renames a label and nothing else.
+      var err = Store.renameFolder(f.id, name);
+      if (err) { alert(err); return; }
+      renderFolderManage();
+    });
+
+    el('btn-delete-folder').addEventListener('click', function () {
+      var count = Store.sessionsInFolder(f.id).length;
+      if (count) { alert(Store.folderNotEmptyMessage(f.name, count)); return; }
+      var p = Store.deleteFolderPrompts(f.name);
+      if (!confirm(p[0])) return;
+      if (!confirm(p[1])) return;
+      var err = Store.deleteFolder(f.id);
+      if (err) { alert(err); return; }
+      manageFolderId = null;
+      show('sessions');
     });
   }
 
@@ -1034,6 +1206,9 @@ var App = (function () {
 
     // sessions
     el('btn-sessions-back').addEventListener('click', function () { show('capture'); });
+    el('btn-search-back').addEventListener('click', function () { show('sessions'); });
+    el('btn-folder-back').addEventListener('click', function () { show('sessions'); });
+
     el('btn-new-session').addEventListener('click', function () {
       var name = prompt('Name for the new search:', 'Search ' + (Store.getSessions().length + 1));
       if (name === null) return;
@@ -1041,8 +1216,19 @@ var App = (function () {
       if (r.error) { alert(r.error); return; }
       session = Store.getActiveSession();
       refreshCount();
-      renderSessions();
       updateCapture();
+      // Land on the new search so its folder can be set in one more tap —
+      // without ever demanding one.
+      manageSessionId = r.session.id;
+      show('search');
+    });
+
+    el('btn-new-folder').addEventListener('click', function () {
+      var name = prompt('New folder name:', '');
+      if (name === null) return;
+      var r = Store.newFolder(name);
+      if (r.error) { alert(r.error); return; }
+      renderSessions();
     });
 
     // settings

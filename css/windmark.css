@@ -290,12 +290,15 @@ body {
 
 /* ---------- sessions / settings ---------------------------------------------- */
 
-.sess { border-bottom: 1px solid var(--line); padding: 12px 4px; }
-.sess.active { background: #10203a; }
-.sess-name { font-size: 20px; font-weight: 800; }
-.sess-meta { color: var(--dim); font-size: 13px; margin: 4px 0 8px; }
-.sess-actions { display: flex; gap: 8px; }
-.sess-actions .btn { flex: 1 1 0; }
+.group-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 14px 4px 6px; border-bottom: 2px solid var(--line);
+}
+.group-name { flex: 1 1 auto; font-size: 15px; font-weight: 800; letter-spacing: 0.12em; color: var(--dim); }
+.group-count { flex: 0 0 auto; font-size: 13px; color: var(--dim); }
+.group-manage { width: auto; min-height: 44px; padding: 6px 12px; font-size: 12px; flex: 0 0 auto; }
+.group-empty { color: var(--dim); font-size: 13px; padding: 10px 4px; }
+.sess-row .c-dir { font-weight: 700; }
 
 .set-group { border-bottom: 1px solid var(--line); padding: 14px 0; }
 .set-label { color: var(--dim); font-size: 13px; letter-spacing: 0.14em; margin-bottom: 8px; }

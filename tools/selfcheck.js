@@ -336,6 +336,186 @@ ok('editing none -> moderate with a bearing in the same write succeeds',
 ok('attaching a bearing alone to a none observation is refused',
   S.Store.updateObservation('obs-dir', { downwind_true: 10, from_true: 190 }) !== null);
 
+/* --- folders: one optional level above searches ---------------------------- */
+mem = {};
+
+/* A search written before folders existed has no folder_id at all. It must
+   read as unfiled, without any migration touching it. */
+S.localStorage.setItem('windmark.v1.sessions', JSON.stringify([
+  { id: 'legacy-1', name: 'Old Search', started: '2026-08-01T09:00:00-06:00' }
+]));
+var legacy = S.Store.getSessions()[0];
+ok('a legacy search survives', legacy && legacy.name === 'Old Search');
+ok('a legacy search reads as unfiled', legacy.folder_id === null, String(legacy.folder_id));
+ok('a legacy search is listed under UNFILED',
+  S.Store.sessionsInFolder(null).some(function (x) { return x.id === 'legacy-1'; }));
+ok('legacy folder_id is not written back to storage',
+  JSON.parse(S.localStorage.getItem('windmark.v1.sessions'))[0].folder_id === undefined);
+var grouped = S.Store.groupedSessions();
+ok('grouping always ends with the unfiled group',
+  grouped[grouped.length - 1].folder === null);
+
+/* create / rename folders */
+var trainRes = S.Store.newFolder('FRRD Training');
+ok('a folder can be created', !trainRes.error && !!trainRes.folder.id);
+var train = trainRes.folder;
+ok('the folder has a stable id, not a name relationship', typeof train.id === 'string' && train.id.length > 8);
+ok('the folder records when it was created', !!train.created);
+ok('an unnamed folder is refused', !!S.Store.newFolder('   ').error);
+var missions = S.Store.newFolder('Missions').folder;
+ok('a second folder can be created', S.Store.getFolders().length === 2);
+
+/* create a search inside a folder */
+var bear = S.Store.newSession('Bear Creek 8/17', train.id).session;
+ok('a search can be created inside a folder', bear.folder_id === train.id);
+ok('the folder lists it', S.Store.sessionsInFolder(train.id).length === 1);
+var north = S.Store.newSession('North Table 8/24', train.id).session;
+var mission = S.Store.newSession('Mission 2026-014', missions.id).session;
+ok('folders keep their own searches',
+  S.Store.sessionsInFolder(train.id).length === 2 &&
+  S.Store.sessionsInFolder(missions.id).length === 1);
+
+function obsFor(id, sesId, name) {
+  return {
+    schema_version: 1, id: id, session_id: sesId, session_name: name,
+    t: '2026-08-17T10:00:00-06:00', lat: 39.8, lon: -105.2, acc_m: 6,
+    gps_fix_t: '2026-08-17T10:00:00-06:00', gps_fix_age_s: 1,
+    downwind_true: 105, from_true: 285, heading_magnetic_raw: 97, declination: 8,
+    declination_applied: true, bearing_source: 'sensor', bearing_input_ref: 'magnetic',
+    intensity: 'moderate', speed_mph: null, speed_source: 'estimated', gusty: false,
+    note: '', app_version: 'test'
+  };
+}
+S.Store.addObservation(obsFor('b1', bear.id, 'Bear Creek 8/17'));
+S.Store.addObservation(obsFor('b2', bear.id, 'Bear Creek 8/17'));
+S.Store.addObservation(obsFor('b3', bear.id, 'Bear Creek 8/17'));
+S.Store.addObservation(obsFor('n1', north.id, 'North Table 8/24'));
+ok('observation counts are per search',
+  S.Store.countObservations(bear.id) === 3 && S.Store.countObservations(north.id) === 1);
+
+/* moving a search never touches its observations */
+var beforeMove = JSON.stringify(S.Store.getObservations(bear.id));
+ok('a search moves to another folder', S.Store.moveSession(bear.id, missions.id) === null);
+ok('the move is recorded on the search',
+  S.Store.getSessions().filter(function (x) { return x.id === bear.id; })[0].folder_id === missions.id);
+ok('moving a search leaves its observations untouched',
+  JSON.stringify(S.Store.getObservations(bear.id)) === beforeMove);
+ok('the old folder no longer lists it', S.Store.sessionsInFolder(train.id).length === 1);
+ok('a search moves back to UNFILED', S.Store.moveSession(bear.id, null) === null);
+ok('UNFILED now holds it', S.Store.sessionsInFolder(null).some(function (x) { return x.id === bear.id; }));
+ok('unfiling still leaves observations untouched',
+  JSON.stringify(S.Store.getObservations(bear.id)) === beforeMove);
+S.Store.moveSession(bear.id, train.id);
+
+/* renames touch labels only */
+var beforeRename = JSON.stringify(S.Store.getAllObservations());
+ok('a folder can be renamed', S.Store.renameFolder(train.id, 'Training 2026') === null);
+ok('the new folder name resolves', S.Store.folderName(train.id) === 'Training 2026');
+ok('renaming a folder alters no observation',
+  JSON.stringify(S.Store.getAllObservations()) === beforeRename);
+ok('a search can be renamed', S.Store.renameSession(bear.id, 'Bear Creek 08-17') === null);
+ok('renaming a search alters no observation',
+  JSON.stringify(S.Store.getAllObservations()) === beforeRename);
+ok('an unnamed folder rename is refused', !!S.Store.renameFolder(train.id, '  '));
+ok('renaming a missing folder reports it', !!S.Store.renameFolder('nope', 'x'));
+
+/* CSV carries the CURRENT organisational names */
+var orgHead = S.Store.toCSV([]).split('\r\n')[0].split(',');
+ok('operational CSV has a folder_name column', orgHead.indexOf('folder_name') >= 0);
+ok('operational CSV has a search_name column', orgHead.indexOf('search_name') >= 0);
+var bearRow = S.Store.toCSV(S.Store.getObservations(bear.id)).split('\r\n')[1].split(',');
+ok('CSV folder_name is the current folder name',
+  bearRow[orgHead.indexOf('folder_name')] === 'Training 2026', bearRow[orgHead.indexOf('folder_name')]);
+ok('CSV search_name is the current search name',
+  bearRow[orgHead.indexOf('search_name')] === 'Bear Creek 08-17', bearRow[orgHead.indexOf('search_name')]);
+var unfiledSes = S.Store.newSession('Loose Search').session;
+S.Store.addObservation(obsFor('u1', unfiledSes.id, 'Loose Search'));
+var unfiledRow = S.Store.toCSV(S.Store.getObservations(unfiledSes.id)).split('\r\n')[1].split(',');
+ok('an unfiled search exports an empty folder_name',
+  unfiledRow[orgHead.indexOf('folder_name')] === '', unfiledRow[orgHead.indexOf('folder_name')]);
+var prHead2 = S.Store.toProvenanceCSV([]).split('\r\n')[0].split(',');
+ok('provenance keeps the capture-time search name for audit',
+  prHead2.indexOf('search_name_at_capture') >= 0);
+var orphanObs = obsFor('orph', 'no-such-search', 'Vanished Search');
+ok('an orphan observation falls back to its stored name',
+  S.Store.toCSV([orphanObs]).split('\r\n')[1].split(',')[orgHead.indexOf('search_name')] === 'Vanished Search');
+ok('an orphan observation exports no folder',
+  S.Store.toCSV([orphanObs]).split('\r\n')[1].split(',')[orgHead.indexOf('folder_name')] === '');
+
+/* clear observations: the search survives, its neighbours are untouched */
+var bearFolderBefore = S.Store.getSessions().filter(function (x) { return x.id === bear.id; })[0].folder_id;
+ok('clearing a search removes its observations', S.Store.clearObservations(bear.id) === null);
+ok('the cleared search now has none', S.Store.countObservations(bear.id) === 0);
+ok('the search itself survives',
+  S.Store.getSessions().some(function (x) { return x.id === bear.id; }));
+ok('its name survives',
+  S.Store.getSessions().filter(function (x) { return x.id === bear.id; })[0].name === 'Bear Creek 08-17');
+ok('its folder assignment survives',
+  S.Store.getSessions().filter(function (x) { return x.id === bear.id; })[0].folder_id === bearFolderBefore);
+ok('another search keeps its observations', S.Store.countObservations(north.id) === 1);
+ok('the emptied search can be reused', S.Store.addObservation(obsFor('b4', bear.id, 'Bear Creek 08-17')) === null);
+ok('and counts again', S.Store.countObservations(bear.id) === 1);
+
+/* deleting a search takes only its own observations */
+ok('deleting a search succeeds', S.Store.deleteSession(bear.id) === null);
+ok('the search is gone', !S.Store.getSessions().some(function (x) { return x.id === bear.id; }));
+ok('its observations are gone', S.Store.countObservations(bear.id) === 0);
+ok('another search is unaffected', S.Store.countObservations(north.id) === 1);
+ok('another search still exists',
+  S.Store.getSessions().some(function (x) { return x.id === north.id; }));
+
+/* a folder holding searches cannot be deleted */
+var busy = S.Store.deleteFolder(train.id);
+ok('a non-empty folder is refused', typeof busy === 'string' && busy.length > 0);
+ok('the refusal counts the searches and says what to do',
+  /contains 1 search\b/.test(busy) && /Move or delete/.test(busy), busy);
+ok('the folder is still there', !!S.Store.getFolder(train.id));
+ok('its searches are still there', S.Store.sessionsInFolder(train.id).length === 1);
+ok('four searches means "searches", not "searchs"',
+  /contains 4 searches/.test(S.Store.folderNotEmptyMessage('X', 4)), S.Store.folderNotEmptyMessage('X', 4));
+
+/* an empty folder can be deleted */
+S.Store.moveSession(north.id, null);
+ok('the folder is now empty', S.Store.sessionsInFolder(train.id).length === 0);
+ok('an empty folder deletes', S.Store.deleteFolder(train.id) === null);
+ok('it is gone', !S.Store.getFolder(train.id));
+ok('the search it held survives', S.Store.getSessions().some(function (x) { return x.id === north.id; }));
+ok('a dangling folder_id reads as unfiled', S.Store.folderName('deleted-folder-id') === '');
+
+/* active-search handling stays valid after a deletion */
+S.Store.setActiveSession(mission.id);
+ok('the active search is the one just set', S.Store.getActiveSession().id === mission.id);
+S.Store.deleteSession(mission.id);
+var fallback = S.Store.getActiveSession();
+ok('a valid active search is chosen after deleting the active one', !!fallback && !!fallback.id);
+ok('the replacement actually exists',
+  S.Store.getSessions().some(function (x) { return x.id === fallback.id; }));
+mem = {};
+var lonely = S.Store.newSession('Only One').session;
+S.Store.setActiveSession(lonely.id);
+S.Store.deleteSession(lonely.id);
+var recreated = S.Store.getActiveSession();
+ok('deleting the last search creates a fresh one rather than leaving none', !!recreated && !!recreated.id);
+ok('the fresh search is empty and unfiled',
+  S.Store.countObservations(recreated.id) === 0 && recreated.folder_id === null);
+
+/* the exact wording of every destructive prompt */
+var cp = S.Store.clearPrompts('Bear Creek 8/17', 37);
+ok('clear prompt 1 names the search and the count',
+  cp[0] === 'Clear all 37 observations from "Bear Creek 8/17"?\nThe search itself will remain.', cp[0]);
+ok('clear prompt 2 warns it cannot be undone',
+  cp[1] === 'This cannot be undone.\nReally clear 37 observations?', cp[1]);
+ok('a single observation is not pluralised',
+  S.Store.clearPrompts('X', 1)[0].indexOf('1 observation from') > 0, S.Store.clearPrompts('X', 1)[0]);
+var dp = S.Store.deleteSearchPrompts('Bear Creek 8/17', 37);
+ok('delete prompt 1 names the search and the count',
+  dp[0] === 'Delete "Bear Creek 8/17" and its 37 observations?', dp[0]);
+ok('delete prompt 2 spells out what is lost',
+  dp[1] === 'This permanently deletes the search and all 37 observations.\nReally delete?', dp[1]);
+var fp = S.Store.deleteFolderPrompts('Missions');
+ok('folder delete asks twice, naming the folder',
+  /Missions/.test(fp[0]) && /Missions/.test(fp[1]) && /cannot be undone/.test(fp[1]), fp.join(' | '));
+
 /* --- speed source: measured, never a brand name --------------------------- */
 mem = {};
 var spdSes = S.Store.newSession('Speeds').session;

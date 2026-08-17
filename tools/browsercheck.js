@@ -33,7 +33,19 @@ const CHROMIUM = process.env.CHROMIUM_PATH || undefined;
 
   // Dialogs: record and auto-dismiss.
   let lastDialog = null;
-  page.on('dialog', async d => { lastDialog = d.message(); await d.accept(); });
+  // Dialogs: recorded, and answered from a plan when one is set so a
+  // confirmation can be deliberately refused.
+  const seen = [];
+  let plan = null;          // e.g. [true, false] = accept the first, refuse the second
+  let promptText = null;    // what a prompt() should return
+  page.on('dialog', async d => {
+    lastDialog = d.message();
+    seen.push(d.message());
+    let answer = true;
+    if (plan && plan.length) answer = plan.shift();
+    if (d.type() === 'prompt') { answer ? await d.accept(promptText || '') : await d.dismiss(); return; }
+    answer ? await d.accept() : await d.dismiss();
+  });
 
   await page.goto(URL);
   await page.click('#btn-start');
@@ -194,16 +206,21 @@ const CHROMIUM = process.env.CHROMIUM_PATH || undefined;
   ok('list says No discernible wind', rows.some(r => /No discernible wind/.test(r)), rows[0]);
   ok('list never says bare "no wind"', !rows.some(r => /\bno wind\b/i.test(r)));
 
-  // ---- 8. session rename reaches the export ----
+  // ---- 8. search rename reaches the export ----
   await page.click('#btn-list-back');
-  await page.click('#btn-to-sessions'); await page.waitForTimeout(200);
+  await page.click('#btn-to-sessions'); await page.waitForTimeout(250);
   ok('no END button on searches', (await page.$$('[data-end]')).length === 0);
-  await page.evaluate(() => { window.prompt = () => 'Drainage Sweep'; });
-  await page.click('[data-rename]'); await page.waitForTimeout(250);
+  ok('row actions are not crowded onto the list rows',
+    (await page.$$('#sessions-body .btn-danger')).length === 0);
+  const activeId = await page.evaluate(() => Store.getActiveSession().id);
+  await page.click(`#sessions-body [data-session="${activeId}"]`); await page.waitForTimeout(250);
+  promptText = 'Drainage Sweep';
+  await page.click('#btn-rename-search'); await page.waitForTimeout(250);
   const csv = await page.evaluate(() => Store.toCSV(Store.getAllObservations()));
   ok('renamed search appears in the export', /Drainage Sweep/.test(csv));
   ok('stored record keeps its capture-time name',
     (await dump()).some(o => o.session_name === 'Search 1'));
+  await page.click('#btn-search-back'); await page.waitForTimeout(150);
 
   // ---- 9. stale sensor is refused ----
   await page.click('#btn-sessions-back');
@@ -316,6 +333,174 @@ const CHROMIUM = process.env.CHROMIUM_PATH || undefined;
   ok('Settings can be scrolled to the very bottom', settings.reachedBottom);
   ok('the last Settings line is reachable, not clipped', settings.aboutVisible);
   await page.click('#btn-settings-back');
+
+  // ---- 11. folders, searches, and destructive safeguards ----
+  const store = (fn, arg) => page.evaluate(fn, arg);
+  const sessionsOf = () => page.evaluate(() => Store.getSessions().map(s => ({
+    id: s.id, name: s.name, folder_id: s.folder_id })));
+  const foldersOf = () => page.evaluate(() => Store.getFolders().map(f => ({ id: f.id, name: f.name })));
+  const countIn = (id) => page.evaluate((i) => Store.countObservations(i), id);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  // A search written before folders existed, seeded straight into storage.
+  await page.evaluate(() => {
+    const raw = JSON.parse(localStorage.getItem('windmark.v1.sessions') || '[]');
+    raw.push({ id: 'legacy-x', name: 'Legacy Search', started: '2026-08-01T09:00:00-06:00' });
+    localStorage.setItem('windmark.v1.sessions', JSON.stringify(raw));
+  });
+  await page.click('#btn-to-sessions'); await page.waitForTimeout(300);
+  let bodyText = await page.textContent('#sessions-body');
+  ok('the searches list shows an UNFILED group', /UNFILED/.test(bodyText), bodyText.slice(0, 80));
+  ok('a legacy search appears in the list', /Legacy Search/.test(bodyText));
+
+  // NEW FOLDER
+  plan = null; promptText = 'FRRD Training';
+  await page.click('#btn-new-folder'); await page.waitForTimeout(300);
+  let folders = await foldersOf();
+  ok('a folder can be created from the UI', folders.some(f => f.name === 'FRRD Training'),
+    JSON.stringify(folders));
+  ok('the folder heading appears in the list',
+    /FRRD Training/.test(await page.textContent('#sessions-body')));
+
+  // NEW SEARCH lands on its own management screen, where a folder can be set
+  promptText = 'Bear Creek 8/17';
+  await page.click('#btn-new-session'); await page.waitForTimeout(300);
+  ok('a new search opens its management screen', await page.isVisible('#search-body'));
+  ok('the management screen names the search',
+    /Bear Creek 8\/17/.test(await page.textContent('#search-body .detail-head')));
+  ok('a new search starts UNFILED', /UNFILED/.test(await page.textContent('#search-body .detail-sub')));
+  ok('an empty search offers no CLEAR OBSERVATIONS', !(await page.isVisible('#btn-clear-obs')));
+
+  const folderId = (await foldersOf()).find(f => f.name === 'FRRD Training').id;
+  await page.click(`#search-body [data-move="${folderId}"]`); await page.waitForTimeout(250);
+  ok('the search moved into the folder',
+    /FRRD Training/.test(await page.textContent('#search-body .detail-sub')),
+    await page.textContent('#search-body .detail-sub'));
+  const bearId = (await sessionsOf()).find(s => s.name === 'Bear Creek 8/17').id;
+  ok('the move is stored as a folder id, not a name',
+    (await sessionsOf()).find(s => s.id === bearId).folder_id === folderId);
+
+  // Capture three observations into it (it became the active search on creation)
+  await page.click('#btn-search-back'); await page.click('#btn-sessions-back');
+  await page.waitForTimeout(200);
+  for (let i = 0; i < 3; i++) {
+    await page.click('#btn-mark'); await page.waitForTimeout(120);
+    await page.click('[data-intensity="none"]'); await page.waitForTimeout(150);
+    await page.click('#btn-ov-done');
+  }
+  ok('observations land in the active search', (await countIn(bearId)) === 3,
+    String(await countIn(bearId)));
+
+  // Renaming does not touch observations
+  const obsBefore = await page.evaluate(() => JSON.stringify(Store.getAllObservations()));
+  await page.click('#btn-to-sessions'); await page.waitForTimeout(250);
+  await page.click(`#sessions-body [data-session="${bearId}"]`); await page.waitForTimeout(250);
+  promptText = 'Bear Creek 08-17';
+  await page.click('#btn-rename-search'); await page.waitForTimeout(250);
+  ok('the search renamed', /Bear Creek 08-17/.test(await page.textContent('#search-body .detail-head')));
+  ok('renaming altered no observation',
+    (await page.evaluate(() => JSON.stringify(Store.getAllObservations()))) === obsBefore);
+  ok('the CSV follows the new search name',
+    /Bear Creek 08-17/.test(await page.evaluate(() => Store.toCSV(Store.getAllObservations()))));
+  ok('the CSV carries the folder name',
+    /FRRD Training/.test(await page.evaluate(() => Store.toCSV(Store.getAllObservations()))));
+
+  // CLEAR OBSERVATIONS — nothing happens until the SECOND confirmation
+  seen.length = 0; plan = [false];
+  await page.click('#btn-clear-obs'); await page.waitForTimeout(250);
+  ok('refusing the first confirmation clears nothing', (await countIn(bearId)) === 3);
+  ok('the first prompt names the search and the exact count',
+    /Clear all 3 observations from "Bear Creek 08-17"\?/.test(seen[0] || ''), seen[0]);
+  ok('the first prompt says the search will remain',
+    /The search itself will remain\./.test(seen[0] || ''), seen[0]);
+
+  seen.length = 0; plan = [true, false];
+  await page.click('#btn-clear-obs'); await page.waitForTimeout(250);
+  ok('refusing the second confirmation still clears nothing', (await countIn(bearId)) === 3,
+    String(await countIn(bearId)));
+  ok('the second prompt warns it cannot be undone',
+    /This cannot be undone\.\s*Really clear 3 observations\?/.test(seen[1] || ''), seen[1]);
+
+  seen.length = 0; plan = [true, true];
+  await page.click('#btn-clear-obs'); await page.waitForTimeout(300);
+  ok('two confirmations clear the observations', (await countIn(bearId)) === 0);
+  let bearNow = (await sessionsOf()).find(s => s.id === bearId);
+  ok('the search survives the clear', !!bearNow);
+  ok('its name survives the clear', bearNow.name === 'Bear Creek 08-17');
+  ok('its folder survives the clear', bearNow.folder_id === folderId);
+  ok('CLEAR OBSERVATIONS disappears once the search is empty',
+    !(await page.isVisible('#btn-clear-obs')));
+
+  // DELETE SEARCH — same two-step rule
+  await page.click('#btn-search-back'); await page.waitForTimeout(200);
+  promptText = 'North Table 8/24';
+  plan = null;
+  await page.click('#btn-new-session'); await page.waitForTimeout(300);
+  const northId = (await sessionsOf()).find(s => s.name === 'North Table 8/24').id;
+  await page.click('#btn-search-back'); await page.click('#btn-sessions-back'); await page.waitForTimeout(200);
+  for (let i = 0; i < 2; i++) {
+    await page.click('#btn-mark'); await page.waitForTimeout(120);
+    await page.click('[data-intensity="none"]'); await page.waitForTimeout(150);
+    await page.click('#btn-ov-done');
+  }
+  ok('the second search has its own observations', (await countIn(northId)) === 2);
+
+  await page.click('#btn-to-sessions'); await page.waitForTimeout(250);
+  await page.click(`#sessions-body [data-session="${northId}"]`); await page.waitForTimeout(250);
+  seen.length = 0; plan = [true, false];
+  await page.click('#btn-delete-search'); await page.waitForTimeout(250);
+  ok('refusing the second confirmation deletes nothing',
+    (await sessionsOf()).some(s => s.id === northId) && (await countIn(northId)) === 2);
+  ok('the delete prompt names the search and its count',
+    /Delete "North Table 8\/24" and its 2 observations\?/.test(seen[0] || ''), seen[0]);
+  ok('the second delete prompt spells out the loss',
+    /permanently deletes the search and all 2 observations/.test(seen[1] || ''), seen[1]);
+
+  seen.length = 0; plan = [true, true];
+  await page.click('#btn-delete-search'); await page.waitForTimeout(350);
+  ok('two confirmations delete the search', !(await sessionsOf()).some(s => s.id === northId));
+  ok('its observations went with it', (await countIn(northId)) === 0);
+  ok('the other search is untouched',
+    (await sessionsOf()).some(s => s.id === bearId));
+  const activeAfter = await page.evaluate(() => Store.getActiveSession().id);
+  ok('a valid active search remains after deleting the active one',
+    (await sessionsOf()).some(s => s.id === activeAfter), activeAfter);
+  ok('the app returned to the searches list', await page.isVisible('#sessions-body'));
+
+  // FOLDER: rename, and refuse deletion while it holds searches
+  await page.click(`#sessions-body [data-folder="${folderId}"]`); await page.waitForTimeout(250);
+  ok('the folder screen lists the searches it holds',
+    /Bear Creek 08-17/.test(await page.textContent('#folder-body')));
+  seen.length = 0; plan = null;
+  await page.click('#btn-delete-folder'); await page.waitForTimeout(250);
+  ok('a non-empty folder is refused, with a count and instructions',
+    /This folder contains 1 search\./.test(seen[0] || '') && /Move or delete/.test(seen[0] || ''), seen[0]);
+  ok('the folder still exists', (await foldersOf()).some(f => f.id === folderId));
+  ok('its searches still exist', (await sessionsOf()).some(s => s.id === bearId));
+
+  promptText = 'Training 2026';
+  await page.click('#btn-rename-folder'); await page.waitForTimeout(250);
+  ok('the folder renamed', /Training 2026/.test(await page.textContent('#folder-body .detail-head')));
+  // That search is empty by now, so resolve the columns for one synthetic row
+  // rather than asserting against observations that no longer exist.
+  ok('the CSV follows the new folder name',
+    /Training 2026/.test(await page.evaluate((id) => Store.toCSV([{ session_id: id }]), bearId)));
+
+  // Empty it, then delete it — still two confirmations
+  await page.click(`#folder-body [data-session="${bearId}"]`); await page.waitForTimeout(250);
+  await page.click('#search-body [data-move=""]'); await page.waitForTimeout(250);
+  ok('the search is unfiled again', /UNFILED/.test(await page.textContent('#search-body .detail-sub')));
+  await page.click('#btn-search-back'); await page.waitForTimeout(200);
+  await page.click(`#sessions-body [data-folder="${folderId}"]`); await page.waitForTimeout(250);
+  seen.length = 0; plan = [true, false];
+  await page.click('#btn-delete-folder'); await page.waitForTimeout(250);
+  ok('refusing the second confirmation keeps the empty folder',
+    (await foldersOf()).some(f => f.id === folderId));
+  seen.length = 0; plan = [true, true];
+  await page.click('#btn-delete-folder'); await page.waitForTimeout(300);
+  ok('two confirmations delete an empty folder', !(await foldersOf()).some(f => f.id === folderId));
+  ok('the search that used to be in it survives', (await sessionsOf()).some(s => s.id === bearId));
+  plan = null;
 
   console.log(pass + ' passed, ' + fail + ' failed');
   console.log('page errors:', errors.length ? errors : 'none');

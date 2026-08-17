@@ -171,8 +171,36 @@
     <button class="btn btn-top" id="btn-sessions-back">BACK</button>
     <div class="top-title">SEARCHES</div>
   </div>
-  <button class="btn btn-wide btn-primary" id="btn-new-session">NEW SEARCH</button>
+  <div class="row-2">
+    <button class="btn btn-primary" id="btn-new-session">NEW SEARCH</button>
+    <button class="btn" id="btn-new-folder">NEW FOLDER</button>
+  </div>
   <div id="sessions-body" class="list-body"></div>
+  <div class="hint">Tap a search to rename, move, clear, or delete it.</div>
+</section>
+
+<!-- =====================================================================
+     ONE SEARCH — rename, move, clear, delete. Kept off the list rows so
+     the list stays readable at a glance.
+     ===================================================================== -->
+<section id="screen-search" class="screen">
+  <div class="topbar">
+    <button class="btn btn-top" id="btn-search-back">BACK</button>
+    <div class="top-title">SEARCH</div>
+  </div>
+  <div id="search-body" class="detail-body"></div>
+</section>
+
+<!-- =====================================================================
+     ONE FOLDER — rename, delete. A folder holding searches is not
+     deletable until those searches are moved or deleted.
+     ===================================================================== -->
+<section id="screen-folder" class="screen">
+  <div class="topbar">
+    <button class="btn btn-top" id="btn-folder-back">BACK</button>
+    <div class="top-title">FOLDER</div>
+  </div>
+  <div id="folder-body" class="detail-body"></div>
 </section>
 
 <!-- =====================================================================

@@ -168,10 +168,75 @@ else.
 and complete **before** the SAVED confirmation is drawn. A failed write shows a red
 NOT SAVED screen instead of a confirmation.
 
-Observations are grouped into **searches** (sessions) so separate operations do not
-mix: New / Rename / Use (switch) / Delete, with confirmation on anything destructive.
-There is no "ended" state — creating or switching a search is enough. An `ended` field
-in older stored data is ignored.
+### Folders, searches, observations
+
+One optional level of organisation, and one only:
+
+```
+FRRD Training
+  ├── Bear Creek 8/17        37 obs
+  └── North Table 8/24       12 obs
+Missions
+  └── Mission 2026-014        5 obs
+UNFILED
+  └── Search 1                0 obs
+```
+
+No nesting, no tags, no colours, no favourites. A search belongs to zero or one folder;
+searches with none appear under **UNFILED**, which is a normal state, not an error.
+
+A search stores `folder_id`, never a folder name:
+
+```json
+{ "id": "folder-uuid", "name": "FRRD Training", "created": "2026-08-17T09:00:00-06:00" }
+{ "id": "search-uuid", "name": "Bear Creek 8/17", "folder_id": "folder-uuid",
+  "started": "2026-08-17T09:12:00-06:00" }
+```
+
+So renaming a folder, renaming a search, or moving a search between folders rewrites one
+field on one record and touches **no observation**. Names are resolved from IDs wherever
+they are shown or exported.
+
+Searches written before folders existed have no `folder_id` at all; they read as unfiled
+and nothing is rewritten on disk for them. There is also no "ended" state — creating or
+switching a search is enough — and an `ended` field in older data is ignored.
+
+The SEARCHES screen lists the groups with a search count and an observation count per
+row, and that is all a row carries. Tapping a search opens its own screen for USE,
+RENAME, the folder picker, CLEAR OBSERVATIONS, and DELETE; tapping FOLDER on a group
+heading opens RENAME FOLDER and DELETE FOLDER. Keeping those controls one tap deeper is
+what stops the list turning into a control panel. Creating a search asks for a name and
+then lands on that screen, where a folder is one more tap — never required.
+
+### Destructive actions take two confirmations
+
+Every one of them, and the first always names what is at stake:
+
+```
+Clear all 37 observations from "Bear Creek 8/17"?      Delete "Bear Creek 8/17" and its 37 observations?
+The search itself will remain.
+
+This cannot be undone.                                 This permanently deletes the search and all
+Really clear 37 observations?                          37 observations. Really delete?
+```
+
+**CLEAR OBSERVATIONS** empties a search and keeps the search, its name, and its folder,
+so it can be reused immediately. It is not offered at all when the search is already
+empty. **DELETE SEARCH** takes the search and its observations, and nothing else — and
+the app always ends up on a valid active search afterwards, falling back to another or
+creating a fresh one.
+
+A folder holding searches **cannot** be deleted:
+
+```
+This folder contains 4 searches.
+Move or delete those searches before deleting the folder.
+```
+
+That is deliberately more annoying than a cascading delete, and much harder to lose a
+day's work to. An empty folder still takes two confirmations. The exact wording lives in
+`Store.clearPrompts` / `deleteSearchPrompts` / `deleteFolderPrompts` / 
+`folderNotEmptyMessage`, so no caller can invent a vaguer version of the question.
 
 ### The bearing / intensity invariant
 
@@ -215,7 +280,7 @@ BEARING does not exist on a no-discernible-wind observation.
   "speed_source": "estimated",
   "gusty": false,
   "note": "",
-  "app_version": "1.4.3"
+  "app_version": "1.5.0"
 }
 ```
 
@@ -262,16 +327,18 @@ measured speed, a free-text note, and delete (confirmed). Correcting an entry to
 
 Two files, deliberately different in kind.
 
-`session_name` in both exports is the search's **current** name, looked up by
-`session_id`, so renaming a search shows up in the next export without rewriting a
-single stored observation. The name captured with the observation stays in the record
-and is used only if its search no longer exists.
+`folder_name` and `search_name` in both exports are the **current** names, resolved
+from `session_id` at export time, so renaming a folder or a search — or moving a search
+— shows up in the next export without rewriting a single stored observation. An unfiled
+search exports an empty `folder_name`. The name captured with the observation stays in
+the record, is used only if its search no longer exists, and appears in the provenance
+file as `search_name_at_capture`.
 
 **Standard (operational)** — `CSV` on the list screen, or Settings for all searches.
 Wind direction appears **only in true degrees**, in columns that say so:
 
 ```
-schema_version,id,session_id,session_name,t,lat,lon,acc_m,gps_fix_t,gps_fix_age_s,
+schema_version,id,session_id,folder_name,search_name,t,lat,lon,acc_m,gps_fix_t,gps_fix_age_s,
 wind_from_deg_true,wind_toward_deg_true,bearing_source,intensity,speed_mph,
 speed_source,gusty,note,app_version
 ```
@@ -281,8 +348,8 @@ in a spreadsheet is how a log gets misread, and nothing downstream should have t
 which north a column meant.
 
 **Provenance** — `PROVENANCE CSV (ALL, WITH RAW °M)` in Settings. Same columns plus
-`raw_input_deg_magnetic`, `input_reference`, `declination_deg_east`, and
-`declination_applied`, for debugging and audit. The filename is suffixed
+`search_name_at_capture`, `raw_input_deg_magnetic`, `input_reference`,
+`declination_deg_east`, and `declination_applied`, for debugging and audit. The filename is suffixed
 `-provenance` so the two cannot be confused.
 
 Both use Web Share with a file attachment where supported — on iPhone that is Save to
@@ -314,7 +381,7 @@ line:
 
 ```
 OFFLINE READY ✓
-WindMark v1.4.3 cached locally
+WindMark v1.5.0 cached locally
 ```
 
 or
@@ -337,7 +404,7 @@ all four of:
 the service worker (`importScripts`), so the check and the cache can never disagree
 about what "cached" means. Because the cache name carries the version, a half-installed
 update cannot masquerade as ready: v1.5.0 asks for the v1.5.0 cache and gets `NOT READY`
-until that cache is complete, while v1.4.3 keeps working from its own.
+until that cache is complete, while v1.5.0 keeps working from its own.
 
 ### PRE-SEARCH CHECK
 
@@ -462,12 +529,14 @@ rule, the downwind/from convention, the Euler-to-heading math, bearing labelling
 source-specific sensor reference, the compass authority rule, the bearing/intensity
 invariant across edits, manual-entry range rejection, wording, the true-only export
 rule, the offline-readiness verdict, the pre-search states, the speed-source rename and
-its migration, and that the cached asset list matches both what the page loads and what
-is on disk (242 checks). It drives the
+its migration, the folder/search organisation with its destructive-prompt wording, and
+that the cached asset list matches both what the page loads and what is on disk
+(312 checks). It drives the
 compass with synthetic orientation events through the real listeners.
 
 Two optional Playwright harnesses cover what needs a real browser:
-`tools/browsercheck.js` (44 checks — screen flow, edit transitions, input rejection) and
+`tools/browsercheck.js` (160 checks — screen flow, edit transitions, input rejection,
+one-viewport layout, and the organisational UI including refused confirmations) and
 `tools/offlinecheck.js` (35 checks — real Cache Storage, offline cold start, a
 deliberately broken update, third-party request tracking). Neither can verify the
 physical sensor — that still requires the walk outside with a compass.
