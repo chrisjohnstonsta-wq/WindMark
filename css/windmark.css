@@ -309,3 +309,34 @@ body {
   .btn-mark { min-height: 120px; font-size: 36px; }
   .btn-int { min-height: 64px; font-size: 22px; }
 }
+
+/* ---------- offline readiness / pre-search check ------------------------------ */
+
+.ready-box {
+  border: 3px solid var(--line); border-radius: 10px;
+  padding: 12px; margin-bottom: 14px; background: var(--panel);
+}
+.ready-box.ready { border-color: var(--ok); }
+.ready-box.notready { border-color: var(--warn); }
+.ready-title { font-size: 22px; font-weight: 900; letter-spacing: 0.04em; }
+.ready-box.ready .ready-title { color: var(--ok); }
+.ready-box.notready .ready-title { color: var(--warn); }
+.ready-detail { font-size: 17px; font-weight: 700; margin-top: 4px; }
+.ready-hint { font-size: 13px; color: var(--dim); margin-top: 6px; line-height: 1.4; }
+
+.ready-line {
+  margin-top: 18px; font-size: 13px; font-weight: 700;
+  color: var(--dim); letter-spacing: 0.04em;
+}
+.ready-line.ready { color: var(--ok); }
+.ready-line.notready { color: var(--warn); }
+
+.checks { margin-bottom: 10px; }
+.check { display: flex; gap: 10px; align-items: flex-start; padding: 8px 2px; }
+.check-mark { flex: 0 0 20px; font-size: 20px; font-weight: 900; line-height: 1.1; }
+.check.pass .check-mark { color: var(--ok); }
+.check.warn .check-mark { color: var(--warn); }
+.check-body { display: flex; flex-direction: column; }
+.check-label { font-size: 16px; font-weight: 700; }
+.check.warn .check-label { color: var(--warn); }
+.check-detail { font-size: 13px; color: var(--dim); margin-top: 2px; }

@@ -154,6 +154,12 @@ GPS never blocks a capture. A poor or stale fix is displayed and stored
 (`±24 m · fix 14 sec ago`), because a flagged observation beats a lost one. If location
 is denied entirely, marks still save with null coordinates.
 
+GPS works without cellular service, but fixes may take longer or be less accurate under
+heavy tree cover, steep terrain, or limited sky view. WindMark records GPS accuracy and
+fix age with every observation. There is no network-assisted location, no map download,
+and no external location service — `watchPosition` with high accuracy, and nothing
+else.
+
 ---
 
 ## Data
@@ -209,7 +215,7 @@ BEARING does not exist on a no-discernible-wind observation.
   "speed_source": "estimated",
   "gusty": false,
   "note": "",
-  "app_version": "1.2.0"
+  "app_version": "1.3.0"
 }
 ```
 
@@ -290,7 +296,8 @@ likewise deliberately out of scope here.
 
 ## Offline / install
 
-Service worker + manifest, cache-first, no runtime network dependency of any kind. All
+A search happens with no cell service, no Wi-Fi, and often in airplane mode. Service
+worker + manifest, strictly cache-first, no runtime network dependency of any kind. All
 assets are local; there are no CDNs, fonts, frameworks, or analytics.
 
 Serve the folder over HTTPS (GitHub Pages works: Settings → Pages → deploy from the
@@ -298,12 +305,113 @@ branch, root folder), open it in Safari, then **Share → Add to Home Screen**. 
 once with a connection so the service worker caches everything; after that it cold
 starts in airplane mode.
 
-Bump `CACHE_NAME` in `sw.js` whenever a cached file changes, or installed phones will
-keep serving the old copy.
+### OFFLINE READY
+
+Settings and the SENSOR PROOF screen both show, and the START screen carries a compact
+line:
+
+```
+OFFLINE READY ✓
+WindMark v1.3.0 cached locally
+```
+
+or
+
+```
+OFFLINE NOT READY
+Connect once before deployment
+```
+
+with a third line saying exactly what is missing. This is deliberately **not**
+`navigator.onLine`, which only reports whether a network interface is up. Ready means
+all four of:
+
+1. the browser has Cache Storage and service workers,
+2. a cache named `windmark-v<this version>` exists,
+3. every file in `WM_ASSETS` is actually in it, and
+4. a service worker is controlling the page right now.
+
+`js/assets.js` holds the version and the file list, and is loaded by both the page and
+the service worker (`importScripts`), so the check and the cache can never disagree
+about what "cached" means. Because the cache name carries the version, a half-installed
+update cannot masquerade as ready: v1.4.0 asks for the v1.4.0 cache and gets `NOT READY`
+until that cache is complete, while v1.3.0 keeps working from its own.
+
+### PRE-SEARCH CHECK
+
+Under the readiness box, in Settings and on SENSOR PROOF:
+
+```
+PRE-SEARCH CHECK
+✓ Offline ready            app cached locally
+✓ Storage available        observations will persist on this phone
+✓ GPS available            waiting for first fix — normal indoors
+✓ Compass available        sensor heading usable
+```
+
+Informational only — it is not a wizard and nothing here blocks a capture. Waiting for a
+first fix indoors counts as available; only a denied or absent geolocation warns. A
+compass that is not ready reads `COMPASS NOT READY — manual bearing remains available`,
+because the Silva and hand entry still do the job.
+
+### Updating
+
+Each version installs into its own cache, and `cache.addAll` is atomic, so a failed
+install leaves nothing behind and never touches the cache the phone is running from. If
+a failed install had created an empty cache, it is deleted — but only if that install
+created it, never one that was already there.
+
+There is no `skipWaiting`: an update waits until WindMark is fully closed, so a running
+search cannot have its assets swapped out mid-log. **Close the app completely and reopen
+it, connected, to finish an update**, then confirm OFFLINE READY shows the new version.
+Old caches are deleted on activation, after the new one is complete.
+
+Cached responses are served as-is and never refreshed in the background — silently
+pulling a newer file into an older version's cache would mix versions on a phone that is
+about to go offline.
+
+Bump `WM_VERSION` in `js/assets.js` whenever a cached file changes.
 
 > iOS note: keep the app installed to the Home Screen and export CSV regularly. Data
 > lives in this phone's browser storage; uninstalling the PWA or clearing Safari data
-> deletes it. There is no cloud copy by design.
+> deletes it. There is no cloud copy by design. WindMark asks for persistent storage
+> once via `navigator.storage.persist()` where it exists (Chrome grants it silently to
+> installed PWAs; Safari does not implement it), and shows the result in Settings.
+> Nothing depends on the answer.
+
+### Offline field test — run this before trusting WindMark on a search
+
+Not passed until performed on the actual iPhone.
+
+1. Connect the iPhone to the internet.
+2. Open the deployed WindMark version.
+3. Add WindMark to the Home Screen.
+4. Launch the installed PWA once while connected.
+5. Confirm **OFFLINE READY**.
+6. Close WindMark completely.
+7. Enable Airplane Mode.
+8. Confirm Wi-Fi is also off.
+9. Launch WindMark from the Home Screen.
+10. Confirm the app cold-starts normally.
+11. Go outside and wait for a GPS fix.
+12. Confirm coordinates, accuracy, and fix age update.
+13. Make at least:
+    * one No discernible wind observation
+    * one manual Magnetic observation
+    * one manual True observation
+    * several phone-sensor observations
+14. Close the app completely.
+15. Reopen it while still in Airplane Mode.
+16. Verify all observations remain.
+17. Export the operational CSV to Files.
+18. Open the CSV and verify:
+    * timestamps
+    * coordinates
+    * accuracy
+    * True wind direction
+    * intensity
+    * no magnetic directional column in the operational export
+19. Repeat several heading comparisons with the Silva, including around north.
 
 ---
 
@@ -312,15 +420,18 @@ keep serving the old copy.
 ```
 index.html                all screens
 css/windmark.css          dark, high-contrast, ≥64 px targets
+js/assets.js              version + cached file list, shared by the page and the worker
 js/util.js                bearings, circular mean, declination rule, time formatting
 js/store.js               localStorage, sessions, schema, CSV
 js/sensors.js             compass + GPS, heavily commented orientation math
+js/offline.js             offline-readiness verdict and the pre-search check
 js/app.js                 capture flow and UI
 sw.js                     offline cache
 manifest.webmanifest      PWA manifest
 icons/                    PNG icons
 tools/selfcheck.js        node tools/selfcheck.js — logic checks, no dependencies
 tools/browsercheck.js     optional UI regression pass (needs Playwright; see its header)
+tools/offlinecheck.js     optional offline / service-worker pass (needs Playwright)
 tools/make_icons.py       regenerates the icons
 ```
 
@@ -329,10 +440,16 @@ No build step, no bundler, no npm, no framework, no backend. Edit a file, reload
 `node tools/selfcheck.js` verifies wraparound, circular averaging, the declination
 rule, the downwind/from convention, the Euler-to-heading math, bearing labelling, the
 source-specific sensor reference, the compass authority rule, the bearing/intensity
-invariant across edits, manual-entry range rejection, wording, and the true-only export
-rule (128 checks). It drives the compass with synthetic orientation events through the
-real listeners. It cannot verify the physical sensor — that still requires the walk
-outside with the Silva.
+invariant across edits, manual-entry range rejection, wording, the true-only export
+rule, the offline-readiness verdict, the pre-search states, and that the cached asset
+list matches both what the page loads and what is on disk (223 checks). It drives the
+compass with synthetic orientation events through the real listeners.
+
+Two optional Playwright harnesses cover what needs a real browser:
+`tools/browsercheck.js` (44 checks — screen flow, edit transitions, input rejection) and
+`tools/offlinecheck.js` (35 checks — real Cache Storage, offline cold start, a
+deliberately broken update, third-party request tracking). Neither can verify the
+physical sensor — that still requires the walk outside with the Silva.
 
 ---
 
@@ -342,6 +459,10 @@ Software-verifiable, checked in a Chromium harness with faked sensors:
 
 - [x] Installed PWA cold-launches offline (service worker serves the shell with the
       network disabled)
+- [x] OFFLINE READY reflects the current version's complete cache, not `navigator.onLine`
+- [x] An incomplete or foreign-version cache reads as OFFLINE NOT READY
+- [x] A failed update leaves the previously working offline version intact
+- [x] No request to any third-party origin
 - [x] Five observations captured entirely offline
 - [x] Reload/reopen loses nothing
 - [x] GPS accuracy and fix age stored (`acc_m`, `gps_fix_t`, `gps_fix_age_s`)

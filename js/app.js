@@ -738,8 +738,11 @@ var App = (function () {
     var all = Store.getAllObservations();
     el('storage-info').textContent = all.length + ' observation(s) across ' +
       Store.getSessions().length + ' search(es) · ~' + Math.round(Store.usageBytes() / 1024) + ' KB stored locally';
+    el('persist-info').textContent = 'Persistent storage: ' + Offline.persistenceText() + '.';
     el('about-info').textContent = 'WindMark ' + WM_VERSION + ' · schema v' + WM_SCHEMA_VERSION +
-      ' · offline · data stays on this phone. Export CSV regularly.';
+      ' · cache ' + WM_CACHE_NAME + ' · data stays on this phone.';
+    renderReadyBox('set-ready');
+    renderChecks('set-checks');
   }
 
   function saveSettings() {
@@ -748,6 +751,69 @@ var App = (function () {
     Compass.setConfig(settings.declination, settings.sensor_ref);
     renderSettings();
     updateCapture();
+  }
+
+  /* ---------- offline readiness / pre-search check --------------------------------
+
+     Rendered into Settings, the Sensor Proof screen, and one compact line on
+     the START screen. Deliberately NOT on the capture screen: that screen
+     stays Point -> MARK WIND -> intensity. */
+
+  function renderReadyBox(id) {
+    var box = el(id);
+    if (!box) return;
+    var st = Offline.state;
+    box.classList.toggle('ready', st.ready);
+    box.classList.toggle('notready', !st.ready);
+    box.querySelector('.ready-title').textContent = st.title;
+    box.querySelector('.ready-detail').textContent = st.detail;
+    box.querySelector('.ready-hint').textContent = st.hint;
+  }
+
+  function renderChecks(id) {
+    var host = el(id);
+    if (!host) return;
+    var rows = Offline.preSearchChecks({
+      offlineReady: Offline.state.ready,
+      storageError: Store.selfTest(),
+      gps: {
+        supported: !!navigator.geolocation,
+        status: Gps.state.status,
+        hasFix: Gps.state.fixCount > 0
+      },
+      compass: { status: Compass.state.status, message: Compass.state.message }
+    });
+    var html = '';
+    rows.forEach(function (r) {
+      html += '<div class="check ' + r.state + '">' +
+        '<span class="check-mark">' + (r.state === 'pass' ? '✓' : '!') + '</span>' +
+        '<span class="check-body"><span class="check-label">' + esc(r.label) + '</span>' +
+        '<span class="check-detail">' + esc(r.detail) + '</span></span></div>';
+    });
+    host.innerHTML = html;
+  }
+
+  function renderReadiness() {
+    renderReadyBox('set-ready');
+    renderReadyBox('diag-ready');
+    renderChecks('set-checks');
+    renderChecks('diag-checks');
+    var gate = el('gate-ready');
+    if (gate) {
+      gate.textContent = Offline.state.checked
+        ? Offline.state.title + ' · ' + Offline.state.detail
+        : 'Checking offline readiness…';
+      gate.classList.toggle('ready', Offline.state.ready);
+      gate.classList.toggle('notready', Offline.state.checked && !Offline.state.ready);
+    }
+  }
+
+  /* Re-reads the cache rather than trusting a cached verdict. */
+  function refreshReadiness() {
+    return Offline.check().then(function () {
+      renderReadiness();
+      return Offline.state;
+    });
   }
 
   /* ---------- CSV export --------------------------------------------------------- */
@@ -862,10 +928,16 @@ var App = (function () {
     lines.push('  online        ' + (navigator.onLine ? 'yes' : 'NO (offline)'));
     lines.push('  serviceworker ' + ('serviceWorker' in navigator
       ? (navigator.serviceWorker.controller ? 'active' : 'registered/not controlling') : 'unsupported'));
+    lines.push('  offline ready ' + (Offline.state.checked ? (Offline.state.ready ? 'YES' : 'NO — ' + Offline.state.reason) : 'not checked'));
+    lines.push('  app cache     ' + WM_CACHE_NAME + ' · ' + WM_ASSETS.length + ' files' +
+      (Offline.state.missing.length ? ' · MISSING: ' + Offline.state.missing.join(', ') : ''));
+    lines.push('  persistent    ' + Offline.persistenceText());
     lines.push('  storage       ' + (Store.selfTest() || 'OK') + ' · ' + Math.round(Store.usageBytes() / 1024) + ' KB');
     lines.push('  version       WindMark ' + WM_VERSION);
 
     el('diag-body').textContent = lines.join('\n');
+    renderReadyBox('diag-ready');
+    renderChecks('diag-checks');
   }
 
   /* ---------- start-up ----------------------------------------------------------------- */
@@ -878,11 +950,23 @@ var App = (function () {
 
   function begin() {
     Beeper.init();
+
+    // Ask for persistent storage at most once, from this user gesture. Chrome
+    // grants it silently to installed PWAs; Safari does not implement it. The
+    // app never depends on the answer.
+    Offline.requestPersistence(!!settings.persist_asked, function (granted, didAsk) {
+      if (didAsk) {
+        settings.persist_asked = true;
+        Store.saveSettings(settings);
+      }
+    });
+
     Gps.start();
     Compass.setConfig(settings.declination, settings.sensor_ref);
     Compass.start().then(function () { updateCapture(); });
     show('capture');
     updateCapture();
+    refreshReadiness();
   }
 
   function wire() {
@@ -892,9 +976,9 @@ var App = (function () {
     el('btn-mark').addEventListener('click', function () { startMark(false); });
     el('btn-manual-entry').addEventListener('click', function () { startMark(true); });
     el('btn-to-list').addEventListener('click', function () { show('list'); });
-    el('btn-to-settings').addEventListener('click', function () { show('settings'); });
+    el('btn-to-settings').addEventListener('click', function () { show('settings'); refreshReadiness(); });
     el('btn-to-sessions').addEventListener('click', function () { show('sessions'); });
-    el('btn-to-diag').addEventListener('click', function () { renderDiag(); show('diag'); });
+    el('btn-to-diag').addEventListener('click', function () { renderDiag(); show('diag'); refreshReadiness(); });
 
     // intensity
     var ints = document.querySelectorAll('[data-intensity]');
@@ -1010,10 +1094,16 @@ var App = (function () {
       exportCSV(Store.getAllObservations(), 'all-searches', true);
     });
 
+    el('btn-recheck').addEventListener('click', function () {
+      el('set-ready').querySelector('.ready-title').textContent = 'Checking…';
+      refreshReadiness();
+    });
+
     // diagnostics
     el('btn-diag-back').addEventListener('click', function () { show('capture'); });
     el('btn-diag-recheck').addEventListener('click', function () {
       Gps.retry();
+      refreshReadiness();
       Compass.retry().then(renderDiag);
     });
 
@@ -1050,11 +1140,21 @@ var App = (function () {
       if (!document.hidden && screen !== 'gate') { Gps.start(); tickUI(); }
     });
 
+    refreshReadiness();
+
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('sw.js').catch(function (e) {
+        navigator.serviceWorker.register('sw.js').then(function () {
+          // The first install finishes after this call; re-check once it has
+          // taken control so the START screen stops saying NOT READY.
+          return navigator.serviceWorker.ready;
+        }).then(function () {
+          refreshReadiness();
+        }).catch(function (e) {
           console.warn('Service worker registration failed:', e);
+          refreshReadiness();
         });
+        navigator.serviceWorker.addEventListener('controllerchange', refreshReadiness);
       });
     }
   }

@@ -1,7 +1,8 @@
 /* WindMark — small shared helpers.
    Deliberately plain: no modules, no build step, no dependencies. */
 
-var WM_VERSION = '1.2.0';
+/* WM_VERSION and the cached asset list live in js/assets.js, which the
+   service worker also imports. */
 var WM_SCHEMA_VERSION = 1;
 
 /* ---------- numbers / bearings ---------------------------------------- */

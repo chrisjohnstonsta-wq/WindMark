@@ -34,6 +34,7 @@
     </p>
     <button id="btn-start" class="btn btn-huge btn-primary">START</button>
     <p class="gate-fine">Grants compass + GPS. Works offline.</p>
+    <div class="ready-line" id="gate-ready">Checking offline readiness…</div>
   </div>
 </section>
 
@@ -184,6 +185,21 @@
   </div>
 
   <div class="set-group">
+    <div class="ready-box" id="set-ready">
+      <div class="ready-title">Checking…</div>
+      <div class="ready-detail"></div>
+      <div class="ready-hint"></div>
+    </div>
+    <div class="set-label">PRE-SEARCH CHECK</div>
+    <div id="set-checks" class="checks"></div>
+    <button class="btn btn-wide" id="btn-recheck">RE-CHECK</button>
+    <div class="set-help">
+      Informational only — nothing here blocks a capture. A warned compass just means
+      the Silva and hand entry do the work.
+    </div>
+  </div>
+
+  <div class="set-group">
     <div class="set-label">DECLINATION (east positive)</div>
     <div class="dec-row">
       <button class="btn btn-nudge" data-dec="-1">−1</button>
@@ -238,6 +254,19 @@
       and audit, not for the map.
     </div>
     <div class="set-help" id="storage-info">—</div>
+    <div class="set-help" id="persist-info">—</div>
+  </div>
+
+  <div class="set-group">
+    <div class="set-label">GPS WITHOUT CELL SERVICE</div>
+    <div class="set-help">
+      GPS works without cellular service, but fixes may take longer or be less accurate
+      under heavy tree cover, steep terrain, or limited sky view. WindMark records GPS
+      accuracy and fix age with every observation.
+      <br><br>
+      A poor or stale fix never prevents recording an observation — the quality is
+      stored alongside it instead.
+    </div>
   </div>
 
   <div class="set-group">
@@ -255,6 +284,13 @@
     <div class="top-title">SENSOR PROOF</div>
     <button class="btn btn-top" id="btn-diag-recheck">RETRY</button>
   </div>
+  <div class="ready-box" id="diag-ready">
+    <div class="ready-title">Checking…</div>
+    <div class="ready-detail"></div>
+    <div class="ready-hint"></div>
+  </div>
+  <div id="diag-checks" class="checks"></div>
+
   <div class="diag-big" id="diag-heading">---°T</div>
   <div class="diag-sub">computed true heading of top of phone</div>
   <pre id="diag-body" class="diag-body">…</pre>
@@ -278,9 +314,11 @@
   </div>
 </div>
 
+<script src="js/assets.js"></script>
 <script src="js/util.js"></script>
 <script src="js/store.js"></script>
 <script src="js/sensors.js"></script>
+<script src="js/offline.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

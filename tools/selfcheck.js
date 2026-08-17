@@ -47,7 +47,7 @@ var sandbox = {
 };
 sandbox.self = sandbox;
 vm.createContext(sandbox);
-['js/util.js', 'js/store.js', 'js/sensors.js'].forEach(function (f) {
+['js/assets.js', 'js/util.js', 'js/store.js', 'js/sensors.js', 'js/offline.js'].forEach(function (f) {
   vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), sandbox, { filename: f });
 });
 
@@ -382,6 +382,208 @@ ok('manual 360°M normalises then corrects to 008°T',
 ok('Store exposes no endSession', S.Store.endSession === undefined);
 ok('a new search carries no ended field',
   !('ended' in S.Store.newSession('Search x').session));
+
+/* --- offline readiness ------------------------------------------------------
+   The verdict is a pure function of four facts, so it can be checked here
+   without a browser. The browser-level half (real Cache Storage, a real
+   service worker, a real airplane-mode cold start) lives in
+   tools/browsercheck.js. */
+
+var ready = S.Offline.evaluate({
+  supported: true, cacheExists: true, missing: [], controlled: true, version: '9.9.9'
+});
+ok('complete cache + controlling worker = OFFLINE READY', ready.ready === true);
+ok('ready title is exactly "OFFLINE READY ✓"', ready.title === 'OFFLINE READY ✓', ready.title);
+ok('ready detail names the version', ready.detail === 'WindMark v9.9.9 cached locally', ready.detail);
+
+var noCache = S.Offline.evaluate({ supported: true, cacheExists: false, controlled: true, version: '9.9.9' });
+ok('no cache for this version = NOT READY', noCache.ready === false && noCache.reason === 'no-cache');
+ok('not-ready title is exactly "OFFLINE NOT READY"', noCache.title === 'OFFLINE NOT READY', noCache.title);
+ok('not-ready detail is exactly "Connect once before deployment"',
+  noCache.detail === 'Connect once before deployment', noCache.detail);
+ok('no-cache hint names the version that is missing', /9\.9\.9/.test(noCache.hint), noCache.hint);
+
+var partial = S.Offline.evaluate({
+  supported: true, cacheExists: true, missing: ['js/app.js', 'css/windmark.css'],
+  controlled: true, version: '9.9.9'
+});
+ok('incomplete cache = NOT READY', partial.ready === false && partial.reason === 'incomplete');
+ok('incomplete hint counts the missing files', /2 files missing/.test(partial.hint), partial.hint);
+
+var uncontrolled = S.Offline.evaluate({
+  supported: true, cacheExists: true, missing: [], controlled: false, version: '9.9.9'
+});
+ok('cached but not controlling = NOT READY', uncontrolled.ready === false && uncontrolled.reason === 'not-controlled');
+ok('uncontrolled hint says to reopen', /reopen/i.test(uncontrolled.hint), uncontrolled.hint);
+
+ok('no cache API at all = NOT READY',
+  S.Offline.evaluate({ supported: false }).reason === 'unsupported');
+
+/* Being offline is the expected field state, never a failure by itself. */
+var offlineButCached = S.Offline.evaluate({
+  supported: true, cacheExists: true, missing: [], controlled: true, online: false
+});
+ok('navigator.onLine === false does not make it NOT READY', offlineButCached.ready === true);
+var onlineButUncached = S.Offline.evaluate({
+  supported: true, cacheExists: false, controlled: true, online: true
+});
+ok('being online does not make an uncached app READY', onlineButUncached.ready === false);
+ok('the readiness verdict never consults navigator.onLine',
+  S.Offline.evaluate.toString().indexOf('onLine') < 0);
+
+/* A new version must not inherit the old version's readiness. */
+ok('cache name carries the version', S.WM_CACHE_NAME === 'windmark-v' + S.WM_VERSION);
+ok('a different version asks for a different cache',
+  ('windmark-v' + '1.4.0') !== S.WM_CACHE_NAME);
+
+/* --- the asset manifest matches what is on disk ---------------------------- */
+S.WM_ASSETS.forEach(function (a) {
+  if (a === './') return;
+  ok('cached asset exists on disk: ' + a, fs.existsSync(path.join(root, a)));
+});
+(function () {
+  // Every script the page loads must be in the cache list, or an offline
+  // cold start would 404 on it.
+  var html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  var srcs = (html.match(/src="([^"]+)"/g) || []).map(function (m) { return m.slice(5, -1); });
+  srcs.concat(['css/windmark.css', 'manifest.webmanifest']).forEach(function (f) {
+    ok('page asset is precached: ' + f, S.WM_ASSETS.indexOf(f) >= 0);
+  });
+})();
+(function () {
+  var sw = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
+  ok('service worker imports the shared manifest', /importScripts\('js\/assets\.js'\)/.test(sw));
+  ok('service worker caches WM_ASSETS under WM_CACHE_NAME',
+    /cache\.addAll\(WM_ASSETS\)/.test(sw) && /caches\.open\(WM_CACHE_NAME\)/.test(sw));
+  ok('service worker does not skipWaiting past a running search',
+    !/self\.skipWaiting\s*\(/.test(sw));
+  ok('service worker deletes only its own old caches', /indexOf\('windmark-'\) === 0/.test(sw));
+  // A cache hit must be returned as-is: no fetch(), no cache.put() on that path.
+  ok('service worker never background-refreshes a cached asset',
+    /if \(hit\) return hit;/.test(sw));
+  ok('service worker ignores off-origin requests', /url\.origin !== self\.location\.origin/.test(sw));
+  // A failed install cleans up only the cache it created — never one that was
+  // already there, which would be the running version's.
+  ok('a failed install only deletes a cache it created itself',
+    /if \(existed\) throw err;/.test(sw) && /caches\.has\(WM_CACHE_NAME\)/.test(sw));
+})();
+
+/* --- no third-party origins anywhere in the app ---------------------------- */
+['index.html', 'js/app.js', 'js/util.js', 'js/store.js', 'js/sensors.js', 'js/offline.js',
+ 'js/assets.js', 'sw.js', 'css/windmark.css', 'manifest.webmanifest'].forEach(function (f) {
+  var text = fs.readFileSync(path.join(root, f), 'utf8');
+  var urls = text.match(/https?:\/\/[^\s"'`)]+/g) || [];
+  // Only comments/documentation may mention a URL; nothing may be fetched.
+  var loaded = (text.match(/(src|href)="https?:[^"]*"/g) || []);
+  ok('no remote asset loaded in ' + f, loaded.length === 0, loaded.join(', '));
+  var apiCalls = text.match(/(fetch|XMLHttpRequest|WebSocket|EventSource)\s*\(\s*['"`]https?:/g) || [];
+  ok('no third-party request in ' + f, apiCalls.length === 0, apiCalls.join(', '));
+  if (urls.length) {
+    // Documentation links are fine; make sure each one is in a comment line.
+    var bad = text.split('\n').filter(function (line) {
+      return /https?:\/\//.test(line) && !/^\s*(\*|\/\/|\/\*|<!--|#)/.test(line) &&
+             !/^\s*[a-z-]+:\s*$/.test(line);
+    });
+    ok('any URL in ' + f + ' is only documentation', bad.length === 0, bad.join(' | ').slice(0, 120));
+  }
+});
+
+/* --- pre-search check ------------------------------------------------------- */
+function checkFor(input) {
+  var rows = S.Offline.preSearchChecks(input);
+  var by = {};
+  rows.forEach(function (r) { by[r.key] = r; });
+  return by;
+}
+
+var allGood = checkFor({
+  offlineReady: true, storageError: null,
+  gps: { supported: true, status: 'ok', hasFix: true },
+  compass: { status: 'ok' }
+});
+ok('all four checks are reported', Object.keys(allGood).length === 4);
+ok('offline pass', allGood.offline.state === 'pass');
+ok('storage pass', allGood.storage.state === 'pass');
+ok('gps pass with a fix', allGood.gps.state === 'pass');
+ok('compass pass when status is ok', allGood.compass.state === 'pass');
+ok('compass label is plain when ready', allGood.compass.label === 'Compass available');
+
+/* Waiting for a first fix indoors is not a failure. */
+var waiting = checkFor({
+  offlineReady: true, storageError: null,
+  gps: { supported: true, status: 'waiting', hasFix: false },
+  compass: { status: 'ok' }
+});
+ok('gps still passes while waiting for a first fix', waiting.gps.state === 'pass', waiting.gps.detail);
+ok('waiting detail says it is normal indoors', /indoors/.test(waiting.gps.detail), waiting.gps.detail);
+ok('a waiting GPS does not warn any other check',
+  waiting.offline.state === 'pass' && waiting.storage.state === 'pass' && waiting.compass.state === 'pass');
+
+var denied = checkFor({
+  offlineReady: true, storageError: null,
+  gps: { supported: true, status: 'denied', hasFix: false },
+  compass: { status: 'ok' }
+});
+ok('denied location warns', denied.gps.state === 'warn');
+ok('denied location says marks still save', /save without coordinates/.test(denied.gps.detail), denied.gps.detail);
+
+var noGeo = checkFor({
+  offlineReady: true, storageError: null,
+  gps: { supported: false }, compass: { status: 'ok' }
+});
+ok('missing geolocation warns', noGeo.gps.state === 'warn');
+
+/* Storage self-test result is reflected, not guessed. */
+var badStore = checkFor({
+  offlineReady: true, storageError: 'Storage unavailable: private mode',
+  gps: { supported: true, status: 'ok', hasFix: true }, compass: { status: 'ok' }
+});
+ok('a failing storage self-test warns', badStore.storage.state === 'warn');
+ok('the storage warning repeats the real reason',
+  badStore.storage.detail === 'Storage unavailable: private mode', badStore.storage.detail);
+ok('a live storage self-test passes here', S.Store.selfTest() === null);
+
+/* Compass failure must always point at the Silva fallback. */
+['unreliable', 'denied', 'stale', 'unsupported', 'waiting', 'idle'].forEach(function (st) {
+  var c = checkFor({
+    offlineReady: true, storageError: null,
+    gps: { supported: true, status: 'ok', hasFix: true },
+    compass: { status: st, message: 'x' }
+  });
+  ok('compass status "' + st + '" warns', c.compass.state === 'warn');
+  ok('compass status "' + st + '" offers the manual fallback',
+    c.compass.label === 'COMPASS NOT READY — manual bearing remains available', c.compass.label);
+});
+
+/* Not being offline-ready never blocks anything else. */
+var notReady = checkFor({
+  offlineReady: false, storageError: null,
+  gps: { supported: true, status: 'ok', hasFix: true }, compass: { status: 'ok' }
+});
+ok('offline warn does not drag down the other checks',
+  notReady.offline.state === 'warn' && notReady.storage.state === 'pass' &&
+  notReady.gps.state === 'pass' && notReady.compass.state === 'pass');
+
+/* --- CSV still works with no network involved ------------------------------- */
+(function () {
+  mem = {};
+  var s2 = S.Store.newSession('Airplane Mode').session;
+  for (var i = 0; i < 3; i++) {
+    S.Store.addObservation({
+      schema_version: 1, id: 'off-' + i, session_id: s2.id, session_name: s2.name,
+      t: '2026-08-16T20:0' + i + ':00-06:00', lat: 39.8, lon: -105.2, acc_m: 7,
+      gps_fix_t: '2026-08-16T20:0' + i + ':00-06:00', gps_fix_age_s: 1,
+      downwind_true: 105, from_true: 285, heading_magnetic_raw: 97, declination: 8,
+      declination_applied: true, bearing_source: 'sensor', bearing_input_ref: 'magnetic',
+      intensity: 'moderate', speed_mph: null, speed_source: 'estimated', gusty: false,
+      note: '', app_version: S.WM_VERSION
+    });
+  }
+  var csv = S.Store.toCSV(S.Store.getObservations(s2.id));
+  ok('CSV is produced from local data alone', csv.trim().split('\r\n').length === 4);
+  ok('offline CSV still carries true bearings only',
+    csv.indexOf('wind_from_deg_true') > 0 && !/magnetic/i.test(csv.split('\r\n')[0]));
+})();
 
 console.log(passes + ' passed, ' + fails + ' failed');
 process.exit(fails ? 1 : 0);

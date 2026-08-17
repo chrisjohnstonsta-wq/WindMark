@@ -18,7 +18,8 @@ var Store = (function () {
     manual_ref: 'magnetic',    // how hand-entered bearings are interpreted
     sensor_ref: 'magnetic',    // how the phone's reported heading is interpreted
     sound: true,
-    vibrate: true
+    vibrate: true,
+    persist_asked: false       // persistent storage is requested at most once
   };
 
   function readJSON(key, fallback) {
