@@ -215,7 +215,7 @@ BEARING does not exist on a no-discernible-wind observation.
   "speed_source": "estimated",
   "gusty": false,
   "note": "",
-  "app_version": "1.3.0"
+  "app_version": "1.4.0"
 }
 ```
 
@@ -312,7 +312,7 @@ line:
 
 ```
 OFFLINE READY ✓
-WindMark v1.3.0 cached locally
+WindMark v1.4.0 cached locally
 ```
 
 or
@@ -334,8 +334,8 @@ all four of:
 `js/assets.js` holds the version and the file list, and is loaded by both the page and
 the service worker (`importScripts`), so the check and the cache can never disagree
 about what "cached" means. Because the cache name carries the version, a half-installed
-update cannot masquerade as ready: v1.4.0 asks for the v1.4.0 cache and gets `NOT READY`
-until that cache is complete, while v1.3.0 keeps working from its own.
+update cannot masquerade as ready: v1.5.0 asks for the v1.5.0 cache and gets `NOT READY`
+until that cache is complete, while v1.4.0 keeps working from its own.
 
 ### PRE-SEARCH CHECK
 
@@ -415,11 +415,29 @@ Not passed until performed on the actual iPhone.
 
 ---
 
+## Colours
+
+Front Range Rescue Dogs: royal blue `#1b4e9b`, red `#d32027`, white. The ground stays
+black — a field instrument has to hold up in direct sun without blinding anyone at
+night, and black is the cheapest thing to put on an OLED during a long search.
+
+The brand blue fills primary actions (MARK WIND, START, USE THIS BEARING) with white
+text and a white border, and a lifted `#4a90e2` carries "good" states — GPS OK, compass
+OK, SAVED, offline ready, a passing pre-search row. Red carries the other direction: a
+warning is red text, a failure is white on a red field (NOT SAVED), so severity reads
+without relying on hue alone.
+
+Every colour is a variable at the top of `css/windmark.css`. MARK WIND's fill is its own
+variable, `--action`: if the blue proves too dark against snow glare during the field
+test, change that one line.
+
+---
+
 ## Files
 
 ```
 index.html                all screens
-css/windmark.css          dark, high-contrast, ≥64 px targets
+css/windmark.css          FRRD palette, dark, high-contrast, ≥64 px targets
 js/assets.js              version + cached file list, shared by the page and the worker
 js/util.js                bearings, circular mean, declination rule, time formatting
 js/store.js               localStorage, sessions, schema, CSV

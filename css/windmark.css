@@ -1,18 +1,37 @@
 /* WindMark — field instrument styling.
    Dark, blunt, high contrast, big targets. No decoration, no animation
-   beyond a single instant state change. Everything must read in direct sun. */
+   beyond a single instant state change. Everything must read in direct sun.
+
+   Colours are the Front Range Rescue Dogs palette — royal blue, red, white.
+   The ground stays black: a field instrument has to hold up in direct sun
+   without blinding anyone at night, and black is also the cheapest thing to
+   put on an OLED for a long search. The brand blue and red carry every state.
+
+   Because the brand is two hues, severity is carried by treatment as well as
+   colour: a warning is red text, a failure is white on a red field. */
 
 :root {
+  --frrd-blue:      #1b4e9b;   /* logo ring — primary fills */
+  --frrd-blue-lift: #4a90e2;   /* same hue lifted for text on black (6.1:1) */
+  --frrd-red:       #d32027;   /* logo cross — failure fills */
+  --frrd-red-lift:  #ff5c5c;   /* same hue lifted for text on black (5.5:1) */
+
   --bg: #000000;
   --fg: #ffffff;
-  --dim: #9aa3ad;
-  --line: #333a42;
-  --panel: #12161a;
-  --accent: #ffd400;     /* primary action */
-  --ok: #35d07f;
-  --warn: #ff8a3d;
-  --bad: #ff4d4d;
-  --tap: 64px;           /* minimum touch target */
+  --dim: #9aa8bc;              /* blue-tinted grey */
+  --line: #24406e;             /* navy rule */
+  --panel: #0c1421;            /* near-black navy */
+
+  /* One variable drives every primary fill, MARK WIND included. If the blue
+     proves too dark against snow glare in the field test, change this line
+     and nothing else. */
+  --action: var(--frrd-blue);
+
+  --accent: var(--frrd-blue-lift);  /* focus rings, °M/°T suffix */
+  --ok: var(--frrd-blue-lift);      /* good / confirmed */
+  --warn: var(--frrd-red-lift);     /* degraded, needs attention */
+  --bad: var(--frrd-red-lift);      /* failed */
+  --tap: 64px;                      /* minimum touch target */
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -55,12 +74,12 @@ body {
   font-family: inherit;
   cursor: pointer;
 }
-.btn:active { background: #262c33; }
-.btn.on { background: #234; border-color: var(--ok); color: var(--ok); }
+.btn:active { background: #1b2b45; }
+.btn.on { background: #14294a; border-color: var(--frrd-blue-lift); color: var(--frrd-blue-lift); }
 
-.btn-primary { background: var(--accent); color: #000; border-color: var(--accent); }
-.btn-primary:active { background: #d9b500; }
-.btn-danger { color: var(--bad); border-color: var(--bad); }
+.btn-primary { background: var(--action); color: #fff; border-color: var(--action); }
+.btn-primary:active { background: #2a68c4; }
+.btn-danger { color: var(--frrd-red-lift); border-color: var(--frrd-red); }
 .btn-huge { min-height: 96px; font-size: 30px; }
 .btn-wide { margin-top: 10px; }
 
@@ -69,12 +88,14 @@ body {
   font-size: 42px;
   font-weight: 900;
   letter-spacing: 0.06em;
-  background: var(--accent);
-  color: #000;
+  background: var(--action);
+  color: #fff;
   border: 3px solid #fff;
   margin-top: 6px;
 }
-.btn-mark:active { background: #fff; }
+/* The tap flash inverts to white — the most visible confirmation available
+   in bright sun, and it costs nothing. */
+.btn-mark:active { background: #fff; color: var(--frrd-blue); }
 
 .btn-sub {
   min-height: var(--tap);
@@ -220,7 +241,7 @@ body {
   border-bottom: 1px solid var(--line); color: var(--fg);
   font-family: inherit; font-size: 17px; text-align: left; padding: 10px 8px;
 }
-.row:active { background: #262c33; }
+.row:active { background: #1b2b45; }
 .c-time { flex: 0 0 52px; color: var(--dim); font-variant-numeric: tabular-nums; }
 .c-dir { flex: 1 1 auto; font-weight: 800; font-variant-numeric: tabular-nums; }
 /* "No discernible wind" is longer than a bearing — let it fit without
@@ -252,7 +273,7 @@ body {
 /* ---------- sessions / settings ---------------------------------------------- */
 
 .sess { border-bottom: 1px solid var(--line); padding: 12px 4px; }
-.sess.active { background: #101820; }
+.sess.active { background: #10203a; }
 .sess-name { font-size: 20px; font-weight: 800; }
 .sess-meta { color: var(--dim); font-size: 13px; margin: 4px 0 8px; }
 .sess-actions { display: flex; gap: 8px; }
@@ -298,10 +319,13 @@ body {
 .ov-title {
   font-size: 56px; font-weight: 900; color: var(--ok); letter-spacing: 0.06em;
 }
-.overlay.bad .ov-title { color: var(--bad); }
+.overlay.bad .ov-title {
+  color: #fff; background: var(--frrd-red);
+  border-radius: 8px; padding: 10px 8px;
+}
 .ov-main { font-size: 28px; font-weight: 800; margin-top: 10px; line-height: 1.3; }
 .ov-sub { color: var(--dim); font-size: 16px; margin-top: 8px; min-height: 20px; }
-.btn-undo { margin-top: 28px; border-color: var(--warn); color: var(--warn); }
+.btn-undo { margin-top: 28px; border-color: var(--frrd-red-lift); color: var(--frrd-red-lift); }
 
 /* Very small phones: keep the giant bearing from crowding MARK WIND. */
 @media (max-height: 700px) {

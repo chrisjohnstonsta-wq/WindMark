@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """Generate WindMark's PNG icons with no third-party dependencies.
 
-Draws a black tile with a yellow downwind arrow (the direction the wind is
-blowing toward) crossing a white north-line, 4x supersampled. Re-run after
-changing the shapes:  python3 tools/make_icons.py
+Front Range Rescue Dogs colours: a royal-blue disc on black, a white downwind
+arrow (the direction the wind is blowing toward), and a red baseline — the
+logo's blue ring, white field, and red cross. 4x supersampled. Re-run after
+changing anything here:  python3 tools/make_icons.py
 """
 import os
 import struct
 import zlib
 
 BG = (0, 0, 0)
-ARROW = (255, 212, 0)
-LINE = (255, 255, 255)
+DISC = (27, 78, 155)        # FRRD blue
+ARROW = (255, 255, 255)     # white
+LINE = (211, 32, 39)        # FRRD red
 
 
 def point_in_poly(x, y, poly):
@@ -37,9 +39,12 @@ def render(size, pad):
         return (pad + u * s, pad + v * s)
 
     # Arrow pointing up = the way the wind is blowing (top of phone).
-    arrow = [P(0.50, 0.06), P(0.86, 0.72), P(0.50, 0.55), P(0.14, 0.72)]
-    # North reference bar across the bottom.
-    bar = [P(0.16, 0.82), P(0.84, 0.82), P(0.84, 0.93), P(0.16, 0.93)]
+    arrow = [P(0.50, 0.08), P(0.82, 0.68), P(0.50, 0.54), P(0.18, 0.68)]
+    # Red baseline, standing in for the logo's cross.
+    bar = [P(0.28, 0.78), P(0.72, 0.78), P(0.72, 0.87), P(0.28, 0.87)]
+    # Blue disc filling the safe area, like the logo's ring.
+    cx = cy = pad + s / 2.0
+    cr = s / 2.0
 
     ss = 4
     px = bytearray()
@@ -55,6 +60,8 @@ def render(size, pad):
                         c = ARROW
                     elif point_in_poly(x, y, bar):
                         c = LINE
+                    elif (x - cx) ** 2 + (y - cy) ** 2 <= cr * cr:
+                        c = DISC
                     else:
                         c = BG
                     acc[0] += c[0]

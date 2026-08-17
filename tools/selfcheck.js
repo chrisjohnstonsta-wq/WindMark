@@ -434,7 +434,7 @@ ok('the readiness verdict never consults navigator.onLine',
 /* A new version must not inherit the old version's readiness. */
 ok('cache name carries the version', S.WM_CACHE_NAME === 'windmark-v' + S.WM_VERSION);
 ok('a different version asks for a different cache',
-  ('windmark-v' + '1.4.0') !== S.WM_CACHE_NAME);
+  ('windmark-v' + S.WM_VERSION + '.1') !== S.WM_CACHE_NAME);
 
 /* --- the asset manifest matches what is on disk ---------------------------- */
 S.WM_ASSETS.forEach(function (a) {
