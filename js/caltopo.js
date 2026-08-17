@@ -10,16 +10,25 @@
    ======================================================================
 
    downwind_true is the true bearing the wind — and therefore scent — is
-   travelling TOWARD. The arrow on the map points that way, from the
-   observation's GPS position:
+   travelling TOWARD. The arrow on the map points that way, and its TIP is
+   the observation's GPS position:
 
-       observation GPS = tail of the arrow
+       observation GPS = TIP of the arrow
        arrow direction = downwind_true
+       tail            = one shaft length UPWIND of the observation
 
    from_true (the meteorological "wind from" bearing) is what people say and
    write, so it appears in the title and description, but it is NEVER the
    direction of the geometry. A wind from 285°T draws an arrow pointing
    105°T.
+
+   Why the tip and not the tail: the dog and handler were physically at the
+   recorded coordinate, and the terrain that could have supplied scent to the
+   dog there lies upwind of it. Hanging the glyph off the upwind side keeps
+   it on the side of the track that matters when the log is read back, and
+   stops it projecting downwind past where the team actually was. The glyph
+   is still a symbol, not a scent cone and not a claim about how far the
+   team searched.
 
    ======================================================================
    ARROW GEOMETRY
@@ -29,11 +38,14 @@
    on itself to draw the head, so CalTopo shows one shape per observation
    rather than three.
 
-       tail ──────────────▶ tip
-                            ├── back-left barb
+       tail ──────────────▶ tip = [RECORDED GPS]
+       (upwind)             ├── back-left barb
                             └── back-right barb
 
        positions: [tail, tip, left, tip, right]
+
+   The recorded coordinate is used exactly as stored for the tip. Every other
+   point is derived from it, never the other way round.
 
    Every point is computed as a geodesic destination — great-circle bearing
    and distance on a sphere — not as a flat offset. At these distances the
@@ -148,19 +160,21 @@ var CalTopo = (function () {
     return ARROW.length_m[intensity] || null;
   }
 
-  /* The five positions of one arrow. lat/lon are the observation's fix;
-     downwindTrue is the direction the wind is blowing toward. */
+  /* The five positions of one arrow. lat/lon are the observation's fix —
+     which IS the tip — and downwindTrue is the direction the wind is blowing
+     toward. Tail and barbs are all measured upwind from the fix, so nothing
+     the glyph draws lies downwind of where the team actually stood. */
   function arrowPositions(lat, lon, downwindTrue, lengthMetres) {
-    var tail = [roundCoord(normLon(lon)), roundCoord(lat)];
-    var tip = destination(lat, lon, downwindTrue, lengthMetres);
+    var tip = [roundCoord(normLon(lon)), roundCoord(lat)];
 
-    // Barbs are measured back from the TIP, along the reversed shaft,
-    // splayed by head_angle_deg either side. Being shorter than the shaft,
-    // they always end up behind the tip.
-    var back = (downwindTrue + 180) % 360;
+    var back = (downwindTrue + 180) % 360;      // upwind
+    var tail = destination(lat, lon, back, lengthMetres);
+
+    // Barbs splay from the same point, head_angle_deg either side of the
+    // upwind direction, and are shorter than the shaft.
     var headLen = lengthMetres * ARROW.head_fraction;
-    var left = destination(tip[1], tip[0], (back - ARROW.head_angle_deg + 360) % 360, headLen);
-    var right = destination(tip[1], tip[0], (back + ARROW.head_angle_deg) % 360, headLen);
+    var left = destination(lat, lon, (back - ARROW.head_angle_deg + 360) % 360, headLen);
+    var right = destination(lat, lon, (back + ARROW.head_angle_deg) % 360, headLen);
 
     return [tail, tip, left, tip, right];
   }

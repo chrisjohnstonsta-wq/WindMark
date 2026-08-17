@@ -280,7 +280,7 @@ BEARING does not exist on a no-discernible-wind observation.
   "speed_source": "estimated",
   "gusty": false,
   "note": "",
-  "app_version": "1.6.1"
+  "app_version": "1.6.2"
 }
 ```
 
@@ -379,9 +379,17 @@ uses the same share sheet the CSV exports use.
 ### Direction
 
 The arrow points **`downwind_true`** — the way the wind, and therefore scent, is
-travelling — with its **tail on the observation's GPS position**. A wind *from* 285°T
-draws an arrow pointing 105°T. `from_true` appears in the title and description because
-that is how people speak and write it, but it is never the direction of the geometry.
+travelling — and its **tip is the observation's GPS position**, with the tail one shaft
+length upwind. A wind *from* 285°T draws an arrow pointing 105°T whose tail sits 
+west-north-west of the recorded fix. `from_true` appears in the title and description
+because that is how people speak and write it, but it is never the direction of the
+geometry.
+
+The dog and handler were physically at the recorded coordinate, and the terrain that
+could have supplied scent to the dog there lies upwind of it. Hanging the glyph off the
+upwind side keeps it on the side of the track that matters when the log is read back,
+and stops it projecting downwind past where the team actually was. It remains a symbol —
+not a scent cone, and not a claim about how far the team searched.
 
 ### Geometry
 
@@ -391,10 +399,15 @@ CalTopo shows one shape, not three.
 ```
 positions: [tail, tip, left barb, tip, right barb]
 
-tail ──────────────▶ tip
-                     ├── barb at (downwind + 180 − 30)°
-                     └── barb at (downwind + 180 + 30)°
+tail ──────────────▶ tip = RECORDED GPS
+(one shaft length    ├── barb at (downwind + 180 − 30)°
+ upwind)             └── barb at (downwind + 180 + 30)°
 ```
+
+The recorded coordinate is used exactly as stored for the tip; every other point is
+derived from it, never the other way round. Tail and both barbs are measured upwind, so
+no part of the glyph lies downwind of where the team stood — asserted for every vertex of
+every test bearing by projecting it onto the downwind axis.
 
 Every point is a geodesic destination — great-circle bearing and distance on a sphere of
 radius 6 371 008.8 m — not a flat offset, so longitude scales correctly with latitude
@@ -403,8 +416,8 @@ metres-per-degree constant would give — a 4.6 m error, a quarter of the arrow)
 0/360 seam is a non-event. Coordinates carry seven decimals, about 1 cm: six (~0.1 m)
 would be over 1% of an 8 m glyph and would swing a 2.2 m barb by up to 1.5°.
 
-Barbs are measured back from the tip along the reversed shaft, so they are always behind
-it — 28% of the shaft at ±30°, unchanged for this test. Everything tunable sits in
+Barbs sweep back from the tip along the reversed shaft — 28% of the shaft at ±30°,
+unchanged for this test — so they always fall inside the shaft length. Everything tunable sits in
 `CalTopo.ARROW`: `head_fraction`, `head_angle_deg`, the stroke colour, coordinate
 precision, and the lengths below.
 
@@ -488,7 +501,7 @@ line:
 
 ```
 OFFLINE READY ✓
-WindMark v1.6.1 cached locally
+WindMark v1.6.2 cached locally
 ```
 
 or
@@ -511,7 +524,7 @@ all four of:
 the service worker (`importScripts`), so the check and the cache can never disagree
 about what "cached" means. Because the cache name carries the version, a half-installed
 update cannot masquerade as ready: v1.5.0 asks for the v1.5.0 cache and gets `NOT READY`
-until that cache is complete, while v1.6.1 keeps working from its own.
+until that cache is complete, while v1.6.2 keeps working from its own.
 
 ### PRE-SEARCH CHECK
 
@@ -641,9 +654,10 @@ source-specific sensor reference, the compass authority rule, the bearing/intens
 invariant across edits, manual-entry range rejection, wording, the true-only export
 rule, the offline-readiness verdict, the pre-search states, the speed-source rename and
 its migration, the folder/search organisation with its destructive-prompt wording, the
-CalTopo arrow geometry across seven bearings and all four symbolic lengths including the
-north seam, and that the cached asset list matches both what the page loads and what is
-on disk (640 checks). It drives the
+CalTopo arrow geometry across seven bearings and all four symbolic lengths — tip on the
+recorded fix, tail upwind, nothing projecting downwind past it, north seam included — and
+that the cached asset list matches both what the page loads and what is on disk
+(690 checks). It drives the
 compass with synthetic orientation events through the real listeners.
 
 Two optional Playwright harnesses cover what needs a real browser:

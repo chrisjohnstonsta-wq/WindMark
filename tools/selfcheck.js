@@ -898,44 +898,86 @@ ok('the 0/360 seam does not change the answer',
     Math.abs(CT.destination(0, 0, 0, d)[1] - CT.destination(60, 0, 0, d)[1] + 60) < 1e-4);
 })();
 
-/* --- arrow shape ---------------------------------------------------------- */
+/* --- arrow shape: the recorded fix is the TIP ------------------------------
+   The dog and handler stood at the recorded coordinate; the terrain that
+   could have supplied scent lies upwind of it. So the glyph hangs upwind and
+   nothing it draws lies downwind of where the team actually was. */
 [0, 1, 45, 90, 180, 270, 359].forEach(function (brg) {
   var pos = CT.arrowPositions(LAT, LON, brg, 16);      // moderate
   ok('arrow at ' + brg + '°T is one 5-point LineString', pos.length === 5);
   var tail = pos[0], tip = pos[1], left = pos[2], mid = pos[3], right = pos[4];
+  var fix = [Math.round(LON * 1e7) / 1e7, Math.round(LAT * 1e7) / 1e7];
+  var upwind = (brg + 180) % 360;
 
-  ok('arrow ' + brg + '°T starts at the observation',
-    Math.abs(tail[0] - LON) < 1e-7 && Math.abs(tail[1] - LAT) < 1e-7);
-  ok('arrow ' + brg + '°T points down-wind, not up-wind',
-    Math.abs(S.angleDiff(CT.bearingDeg(tail, tip), brg)) < 0.5,
-    CT.bearingDeg(tail, tip).toFixed(2));
-  ok('arrow ' + brg + '°T is the requested length',
-    Math.abs(CT.distanceM(tail, tip) - 16) < 0.05, CT.distanceM(tail, tip).toFixed(3));
-  ok('arrow ' + brg + '°T returns to the tip between barbs',
+  // 1. the tip IS the observation coordinate, used exactly as stored
+  ok('arrow ' + brg + '°T tips exactly at the recorded coordinate',
+    tip[0] === fix[0] && tip[1] === fix[1], tip.join(',') + ' vs ' + fix.join(','));
+  ok('arrow ' + brg + '°T returns to the same tip between barbs',
     mid[0] === tip[0] && mid[1] === tip[1]);
 
-  // Barbs sit behind the tip: nearer the tail, and swept back either side.
-  ok('arrow ' + brg + '°T left barb is behind the tip',
-    CT.distanceM(tail, left) < CT.distanceM(tail, tip));
-  ok('arrow ' + brg + '°T right barb is behind the tip',
-    CT.distanceM(tail, right) < CT.distanceM(tail, tip));
+  // 2. the tail is one shaft length upwind of it
+  ok('arrow ' + brg + '°T tail is the shaft length from the fix',
+    Math.abs(CT.distanceM(tip, tail) - 16) < 0.05, CT.distanceM(tip, tail).toFixed(3));
+  ok('arrow ' + brg + '°T tail lies upwind of the fix',
+    Math.abs(S.angleDiff(CT.bearingDeg(tip, tail), upwind)) < 0.5,
+    CT.bearingDeg(tip, tail).toFixed(2));
+
+  // 3. and the shaft still points downwind, which is the whole convention
+  ok('arrow ' + brg + '°T shaft runs tail -> tip along downwind_true',
+    Math.abs(S.angleDiff(CT.bearingDeg(tail, tip), brg)) < 0.5,
+    CT.bearingDeg(tail, tip).toFixed(2));
+
+  // 4. nothing at all extends downwind past the recorded coordinate: every
+  //    vertex projects onto the downwind axis at zero or behind.
+  pos.forEach(function (c, i) {
+    var along = CT.distanceM(tip, c) *
+      Math.cos((CT.bearingDeg(tip, c) - brg) * Math.PI / 180);
+    ok('arrow ' + brg + '°T vertex ' + i + ' does not reach past the fix downwind',
+      along <= 0.01, along.toFixed(3));
+  });
+
+  // 5. barbs sweep back from the recorded coordinate, ±head_angle either side
   var headLen = 16 * CT.ARROW.head_fraction;      // 4.48 m
   ok('arrow ' + brg + '°T barbs are the configured head length',
     Math.abs(CT.distanceM(tip, left) - headLen) < 0.05 &&
     Math.abs(CT.distanceM(tip, right) - headLen) < 0.05,
     CT.distanceM(tip, left).toFixed(3));
-  var back = (brg + 180) % 360;
-  ok('arrow ' + brg + '°T barbs are swept ±' + CT.ARROW.head_angle_deg + '°',
-    Math.abs(Math.abs(S.angleDiff(CT.bearingDeg(tip, left), back)) - CT.ARROW.head_angle_deg) < 1 &&
-    Math.abs(Math.abs(S.angleDiff(CT.bearingDeg(tip, right), back)) - CT.ARROW.head_angle_deg) < 1);
+  ok('arrow ' + brg + '°T barbs are swept ±' + CT.ARROW.head_angle_deg + '° from upwind',
+    Math.abs(Math.abs(S.angleDiff(CT.bearingDeg(tip, left), upwind)) - CT.ARROW.head_angle_deg) < 0.5 &&
+    Math.abs(Math.abs(S.angleDiff(CT.bearingDeg(tip, right), upwind)) - CT.ARROW.head_angle_deg) < 0.5);
   ok('arrow ' + brg + '°T barbs fall either side of the shaft',
-    S.angleDiff(CT.bearingDeg(tip, left), back) * S.angleDiff(CT.bearingDeg(tip, right), back) < 0);
+    S.angleDiff(CT.bearingDeg(tip, left), upwind) * S.angleDiff(CT.bearingDeg(tip, right), upwind) < 0);
+  ok('arrow ' + brg + '°T barbs stay inside the shaft length',
+    CT.distanceM(tip, left) < CT.distanceM(tip, tail) &&
+    CT.distanceM(tip, right) < CT.distanceM(tip, tail));
+
   pos.forEach(function (c) {
     ok('arrow ' + brg + '°T coordinate is a finite [lon, lat]',
       c.length === 2 && isFinite(c[0]) && isFinite(c[1]) &&
       c[0] >= -180 && c[0] <= 180 && c[1] >= -90 && c[1] <= 90, c.join(','));
   });
 });
+
+/* The 0/360 seam, stated in plain compass terms: a wind blowing due north
+   hangs its glyph due south of the fix, and vice versa. */
+(function () {
+  var n = CT.arrowPositions(LAT, LON, 0, 20);
+  ok('a due-north wind puts the tail due south of the fix',
+    n[0][1] < n[1][1] && Math.abs(n[0][0] - n[1][0]) < 1e-7, n[0].join(','));
+  var s360 = CT.arrowPositions(LAT, LON, 360, 20);
+  ok('360°T draws exactly what 0°T draws', JSON.stringify(s360) === JSON.stringify(n));
+  var a359 = CT.arrowPositions(LAT, LON, 359, 20);
+  var a001 = CT.arrowPositions(LAT, LON, 1, 20);
+  ok('359°T hangs its tail just east of due south',
+    a359[0][0] > a359[1][0] && a359[0][1] < a359[1][1], a359[0].join(','));
+  ok('001°T hangs its tail just west of due south',
+    a001[0][0] < a001[1][0] && a001[0][1] < a001[1][1], a001[0].join(','));
+  ok('both still tip exactly on the fix',
+    a359[1][1] === a001[1][1] && a359[1][0] === a001[1][0]);
+  var s180 = CT.arrowPositions(LAT, LON, 180, 20);
+  ok('a due-south wind puts the tail due north of the fix',
+    s180[0][1] > s180[1][1] && Math.abs(s180[0][0] - s180[1][0]) < 1e-7);
+})();
 
 /* --- the convention: toward, never from ----------------------------------- */
 function ctObs(over) {
@@ -963,8 +1005,10 @@ var ctx = { searchName: 'Bear Creek 8/17', folderName: 'Handler Training' };
     Math.abs(S.angleDiff(drawn, 285)) > 170, drawn.toFixed(2));
   ok('a wind from the west-north-west draws an arrow to the east-south-east',
     c[1][0] > c[0][0] && c[1][1] < c[0][1], JSON.stringify(c.slice(0, 2)));
-  ok('the tail is the observation fix',
-    c[0][0] === Math.round(LON * 1e7) / 1e7 && c[0][1] === Math.round(LAT * 1e7) / 1e7);
+  ok('the tip is the observation fix',
+    c[1][0] === Math.round(LON * 1e7) / 1e7 && c[1][1] === Math.round(LAT * 1e7) / 1e7);
+  ok('the glyph sits on the upwind side, west-north-west of the fix',
+    c[0][0] < c[1][0] && c[0][1] > c[1][1], JSON.stringify(c[0]));
 })();
 
 /* --- symbolic lengths ------------------------------------------------------ */
@@ -985,6 +1029,11 @@ ok('every arrow is a compact glyph, not a vector across the search area',
   var c = f.geometry.coordinates;
   ok(pair[0] + ' draws a ' + pair[1] + ' m shaft',
     Math.abs(CT.distanceM(c[0], c[1]) - pair[1]) < 0.05, CT.distanceM(c[0], c[1]).toFixed(3));
+  ok(pair[0] + ' tips on the fix whatever its length',
+    c[1][0] === Math.round(LON * 1e7) / 1e7 && c[1][1] === Math.round(LAT * 1e7) / 1e7);
+  ok(pair[0] + ' hangs its tail ' + pair[1] + ' m upwind of the fix',
+    Math.abs(S.angleDiff(CT.bearingDeg(c[1], c[0]), 285)) < 0.5,
+    CT.bearingDeg(c[1], c[0]).toFixed(2));
   ok(pair[0] + ' barbs stay 28% of its own shaft',
     Math.abs(CT.distanceM(c[1], c[2]) - pair[1] * 0.28) < 0.05,
     CT.distanceM(c[1], c[2]).toFixed(3));

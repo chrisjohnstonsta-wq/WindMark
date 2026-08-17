@@ -570,6 +570,18 @@ const CHROMIUM = process.env.CHROMIUM_PATH || undefined;
       const c = line.geometry.coordinates;
       return c[1][0] > c[0][0] && c[1][1] < c[0][1];   // 105°T = east-south-east
     })());
+    ok('the arrow tips exactly on the recorded coordinate', (() => {
+      const c = line.geometry.coordinates;
+      return c[1][0] === -105.216763 && c[1][1] === 39.865811;
+    })(), JSON.stringify(line.geometry.coordinates[1]));
+    ok('the glyph hangs upwind of the recorded coordinate', (() => {
+      const c = line.geometry.coordinates;
+      return c[0][0] < c[1][0] && c[0][1] > c[1][1];   // tail to the west-north-west
+    })());
+    ok('the no-wind point is exactly the recorded coordinate',
+      point.geometry.coordinates[0] === -105.216763 &&
+      point.geometry.coordinates[1] === 39.865811,
+      JSON.stringify(point.geometry.coordinates));
     ok('the description carries the current folder and search',
       /Folder: Export Test/.test(line.properties.description) &&
       /Search: Arrow Search/.test(line.properties.description));
