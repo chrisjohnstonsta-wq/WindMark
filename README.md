@@ -173,7 +173,7 @@ NOT SAVED screen instead of a confirmation.
 One optional level of organisation, and one only:
 
 ```
-FRRD Training
+Handler Training
   ├── Bear Creek 8/17        37 obs
   └── North Table 8/24       12 obs
 Missions
@@ -188,7 +188,7 @@ searches with none appear under **UNFILED**, which is a normal state, not an err
 A search stores `folder_id`, never a folder name:
 
 ```json
-{ "id": "folder-uuid", "name": "FRRD Training", "created": "2026-08-17T09:00:00-06:00" }
+{ "id": "folder-uuid", "name": "Handler Training", "created": "2026-08-17T09:00:00-06:00" }
 { "id": "search-uuid", "name": "Bear Creek 8/17", "folder_id": "folder-uuid",
   "started": "2026-08-17T09:12:00-06:00" }
 ```
@@ -280,7 +280,7 @@ BEARING does not exist on a no-discernible-wind observation.
   "speed_source": "estimated",
   "gusty": false,
   "note": "",
-  "app_version": "1.5.0"
+  "app_version": "1.5.1"
 }
 ```
 
@@ -381,7 +381,7 @@ line:
 
 ```
 OFFLINE READY ✓
-WindMark v1.5.0 cached locally
+WindMark v1.5.1 cached locally
 ```
 
 or
@@ -404,7 +404,7 @@ all four of:
 the service worker (`importScripts`), so the check and the cache can never disagree
 about what "cached" means. Because the cache name carries the version, a half-installed
 update cannot masquerade as ready: v1.5.0 asks for the v1.5.0 cache and gets `NOT READY`
-until that cache is complete, while v1.5.0 keeps working from its own.
+until that cache is complete, while v1.5.1 keeps working from its own.
 
 ### PRE-SEARCH CHECK
 
@@ -486,15 +486,18 @@ Not passed until performed on the actual iPhone.
 
 ## Colours
 
-Front Range Rescue Dogs: royal blue `#1b4e9b`, red `#d32027`, white. The ground stays
-black — a field instrument has to hold up in direct sun without blinding anyone at
-night, and black is the cheapest thing to put on an OLED during a long search.
+Royal blue `#1b4e9b`, red `#d32027`, white. The ground stays black — a field instrument
+has to hold up in direct sun without blinding anyone at night, and black is the cheapest
+thing to put on an OLED during a long search.
 
-The brand blue fills primary actions (MARK WIND, START, USE THIS BEARING) with white
-text and a white border, and a lifted `#4a90e2` carries "good" states — GPS OK, compass
-OK, SAVED, offline ready, a passing pre-search row. Red carries the other direction: a
-warning is red text, a failure is white on a red field (NOT SAVED), so severity reads
-without relying on hue alone.
+Blue fills primary actions (MARK WIND, START, USE THIS BEARING) with white text and a
+white border, and a lifted `#4a90e2` carries "good" states — GPS OK, compass OK, SAVED,
+offline ready, a passing pre-search row. Red carries the other direction: a warning is
+red text, a failure is white on a red field (NOT SAVED), so severity reads without
+relying on hue alone.
+
+No organisation name, logo, or wordmark appears anywhere in the app. It is a plain
+instrument, usable by any handler on any team.
 
 Every colour is a variable at the top of `css/windmark.css`. MARK WIND's fill is its own
 variable, `--action`: if the blue proves too dark against snow glare during the field
@@ -506,7 +509,7 @@ test, change that one line.
 
 ```
 index.html                all screens
-css/windmark.css          FRRD palette, dark, high-contrast, ≥64 px targets
+css/windmark.css          dark, high-contrast, ≥64 px targets
 js/assets.js              version + cached file list, shared by the page and the worker
 js/util.js                bearings, circular mean, declination rule, time formatting
 js/store.js               localStorage, sessions, schema, CSV

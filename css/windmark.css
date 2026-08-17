@@ -2,19 +2,19 @@
    Dark, blunt, high contrast, big targets. No decoration, no animation
    beyond a single instant state change. Everything must read in direct sun.
 
-   Colours are the Front Range Rescue Dogs palette — royal blue, red, white.
-   The ground stays black: a field instrument has to hold up in direct sun
-   without blinding anyone at night, and black is also the cheapest thing to
-   put on an OLED for a long search. The brand blue and red carry every state.
+   Three colours: royal blue, red, white. The ground stays black — a field
+   instrument has to hold up in direct sun without blinding anyone at night,
+   and black is also the cheapest thing to put on an OLED for a long search.
+   Blue and red carry every state between them.
 
-   Because the brand is two hues, severity is carried by treatment as well as
-   colour: a warning is red text, a failure is white on a red field. */
+   With only two hues, severity is carried by treatment as well as colour: a
+   warning is red text, a failure is white on a red field. */
 
 :root {
-  --frrd-blue:      #1b4e9b;   /* logo ring — primary fills */
-  --frrd-blue-lift: #4a90e2;   /* same hue lifted for text on black (6.1:1) */
-  --frrd-red:       #d32027;   /* logo cross — failure fills */
-  --frrd-red-lift:  #ff5c5c;   /* same hue lifted for text on black (5.5:1) */
+  --wm-blue:      #1b4e9b;   /* primary fills */
+  --wm-blue-lift: #4a90e2;   /* same hue lifted for text on black (6.1:1) */
+  --wm-red:       #d32027;   /* failure fills */
+  --wm-red-lift:  #ff5c5c;   /* same hue lifted for text on black (5.5:1) */
 
   --bg: #000000;
   --fg: #ffffff;
@@ -25,12 +25,12 @@
   /* One variable drives every primary fill, MARK WIND included. If the blue
      proves too dark against snow glare in the field test, change this line
      and nothing else. */
-  --action: var(--frrd-blue);
+  --action: var(--wm-blue);
 
-  --accent: var(--frrd-blue-lift);  /* focus rings, °M/°T suffix */
-  --ok: var(--frrd-blue-lift);      /* good / confirmed */
-  --warn: var(--frrd-red-lift);     /* degraded, needs attention */
-  --bad: var(--frrd-red-lift);      /* failed */
+  --accent: var(--wm-blue-lift);  /* focus rings, °M/°T suffix */
+  --ok: var(--wm-blue-lift);      /* good / confirmed */
+  --warn: var(--wm-red-lift);     /* degraded, needs attention */
+  --bad: var(--wm-red-lift);      /* failed */
   --tap: 64px;                      /* minimum touch target */
 }
 
@@ -90,11 +90,11 @@ body {
   cursor: pointer;
 }
 .btn:active { background: #1b2b45; }
-.btn.on { background: #14294a; border-color: var(--frrd-blue-lift); color: var(--frrd-blue-lift); }
+.btn.on { background: #14294a; border-color: var(--wm-blue-lift); color: var(--wm-blue-lift); }
 
 .btn-primary { background: var(--action); color: #fff; border-color: var(--action); }
 .btn-primary:active { background: #2a68c4; }
-.btn-danger { color: var(--frrd-red-lift); border-color: var(--frrd-red); }
+.btn-danger { color: var(--wm-red-lift); border-color: var(--wm-red); }
 .btn-huge { min-height: 96px; font-size: 30px; }
 .btn-wide { margin-top: 10px; }
 
@@ -110,7 +110,7 @@ body {
 }
 /* The tap flash inverts to white — the most visible confirmation available
    in bright sun, and it costs nothing. */
-.btn-mark:active { background: #fff; color: var(--frrd-blue); }
+.btn-mark:active { background: #fff; color: var(--wm-blue); }
 
 .btn-sub {
   min-height: var(--tap);
@@ -341,12 +341,12 @@ body {
   font-size: 56px; font-weight: 900; color: var(--ok); letter-spacing: 0.06em;
 }
 .overlay.bad .ov-title {
-  color: #fff; background: var(--frrd-red);
+  color: #fff; background: var(--wm-red);
   border-radius: 8px; padding: 10px 8px;
 }
 .ov-main { font-size: 28px; font-weight: 800; margin-top: 10px; line-height: 1.3; }
 .ov-sub { color: var(--dim); font-size: 16px; margin-top: 8px; min-height: 20px; }
-.btn-undo { margin-top: 28px; border-color: var(--frrd-red-lift); color: var(--frrd-red-lift); }
+.btn-undo { margin-top: 28px; border-color: var(--wm-red-lift); color: var(--wm-red-lift); }
 
 /* Very small phones: keep the giant bearing from crowding MARK WIND. */
 @media (max-height: 700px) {

@@ -354,13 +354,13 @@ const CHROMIUM = process.env.CHROMIUM_PATH || undefined;
   ok('a legacy search appears in the list', /Legacy Search/.test(bodyText));
 
   // NEW FOLDER
-  plan = null; promptText = 'FRRD Training';
+  plan = null; promptText = 'Handler Training';
   await page.click('#btn-new-folder'); await page.waitForTimeout(300);
   let folders = await foldersOf();
-  ok('a folder can be created from the UI', folders.some(f => f.name === 'FRRD Training'),
+  ok('a folder can be created from the UI', folders.some(f => f.name === 'Handler Training'),
     JSON.stringify(folders));
   ok('the folder heading appears in the list',
-    /FRRD Training/.test(await page.textContent('#sessions-body')));
+    /Handler Training/.test(await page.textContent('#sessions-body')));
 
   // NEW SEARCH lands on its own management screen, where a folder can be set
   promptText = 'Bear Creek 8/17';
@@ -371,10 +371,10 @@ const CHROMIUM = process.env.CHROMIUM_PATH || undefined;
   ok('a new search starts UNFILED', /UNFILED/.test(await page.textContent('#search-body .detail-sub')));
   ok('an empty search offers no CLEAR OBSERVATIONS', !(await page.isVisible('#btn-clear-obs')));
 
-  const folderId = (await foldersOf()).find(f => f.name === 'FRRD Training').id;
+  const folderId = (await foldersOf()).find(f => f.name === 'Handler Training').id;
   await page.click(`#search-body [data-move="${folderId}"]`); await page.waitForTimeout(250);
   ok('the search moved into the folder',
-    /FRRD Training/.test(await page.textContent('#search-body .detail-sub')),
+    /Handler Training/.test(await page.textContent('#search-body .detail-sub')),
     await page.textContent('#search-body .detail-sub'));
   const bearId = (await sessionsOf()).find(s => s.name === 'Bear Creek 8/17').id;
   ok('the move is stored as a folder id, not a name',
@@ -403,7 +403,7 @@ const CHROMIUM = process.env.CHROMIUM_PATH || undefined;
   ok('the CSV follows the new search name',
     /Bear Creek 08-17/.test(await page.evaluate(() => Store.toCSV(Store.getAllObservations()))));
   ok('the CSV carries the folder name',
-    /FRRD Training/.test(await page.evaluate(() => Store.toCSV(Store.getAllObservations()))));
+    /Handler Training/.test(await page.evaluate(() => Store.toCSV(Store.getAllObservations()))));
 
   // CLEAR OBSERVATIONS — nothing happens until the SECOND confirmation
   seen.length = 0; plan = [false];

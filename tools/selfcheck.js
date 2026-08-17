@@ -356,7 +356,7 @@ ok('grouping always ends with the unfiled group',
   grouped[grouped.length - 1].folder === null);
 
 /* create / rename folders */
-var trainRes = S.Store.newFolder('FRRD Training');
+var trainRes = S.Store.newFolder('Handler Training');
 ok('a folder can be created', !trainRes.error && !!trainRes.folder.id);
 var train = trainRes.folder;
 ok('the folder has a stable id, not a name relationship', typeof train.id === 'string' && train.id.length > 8);
@@ -585,11 +585,18 @@ ok('intensity label is NO DISCERNIBLE WIND', S.INTENSITY_LABEL.none === 'NO DISC
 
 /* Instrument brands tell the handler nothing: the app says "compass" and
    "measured". The only allowed mention of the old value is the migration that
-   rewrites it. */
-['index.html', 'js/app.js', 'js/util.js', 'js/sensors.js', 'js/offline.js'].forEach(function (f) {
+   rewrites it. Organisation names have no place in it either — WindMark is a
+   plain instrument, not any one team's app. */
+['index.html', 'js/app.js', 'js/util.js', 'js/sensors.js', 'js/offline.js',
+ 'js/assets.js', 'js/store.js', 'css/windmark.css', 'manifest.webmanifest',
+ 'sw.js'].forEach(function (f) {
   var text = fs.readFileSync(path.join(root, f), 'utf8');
-  ok('no instrument brand names in ' + f, !/silva|kestrel/i.test(text),
-    (text.match(/silva|kestrel/gi) || []).join(', '));
+  if (f !== 'js/store.js') {   // store.js names the legacy value it migrates
+    ok('no instrument brand names in ' + f, !/silva|kestrel/i.test(text),
+      (text.match(/silva|kestrel/gi) || []).join(', '));
+  }
+  ok('no organisation name in ' + f, !/frrd|front range/i.test(text),
+    (text.match(/frrd|front range/gi) || []).join(', '));
 });
 
 /* --- manual entry rejects out-of-range values ------------------------------ */

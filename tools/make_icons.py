@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """Generate WindMark's PNG icons with no third-party dependencies.
 
-Front Range Rescue Dogs colours: a royal-blue disc on black, a white downwind
-arrow (the direction the wind is blowing toward), and a red baseline — the
-logo's blue ring, white field, and red cross. 4x supersampled. Re-run after
-changing anything here:  python3 tools/make_icons.py
+A royal-blue disc on black, a white downwind arrow (the direction the wind is
+blowing toward), and a red baseline. 4x supersampled. Re-run after changing
+anything here:  python3 tools/make_icons.py
 """
 import os
 import struct
 import zlib
 
 BG = (0, 0, 0)
-DISC = (27, 78, 155)        # FRRD blue
+DISC = (27, 78, 155)        # blue
 ARROW = (255, 255, 255)     # white
-LINE = (211, 32, 39)        # FRRD red
+LINE = (211, 32, 39)        # red
 
 
 def point_in_poly(x, y, poly):
