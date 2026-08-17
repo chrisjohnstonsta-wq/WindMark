@@ -47,7 +47,8 @@ var sandbox = {
 };
 sandbox.self = sandbox;
 vm.createContext(sandbox);
-['js/assets.js', 'js/util.js', 'js/store.js', 'js/sensors.js', 'js/offline.js'].forEach(function (f) {
+['js/assets.js', 'js/util.js', 'js/store.js', 'js/sensors.js', 'js/offline.js',
+ 'js/caltopo.js'].forEach(function (f) {
   vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), sandbox, { filename: f });
 });
 
@@ -822,6 +823,329 @@ ok('offline warn does not drag down the other checks',
   ok('CSV is produced from local data alone', csv.trim().split('\r\n').length === 4);
   ok('offline CSV still carries true bearings only',
     csv.indexOf('wind_from_deg_true') > 0 && !/magnetic/i.test(csv.split('\r\n')[0]));
+})();
+
+/* ==========================================================================
+   CalTopo / GeoJSON export — geometry first. None of this is validated until
+   a real file has been imported into the CalTopo app and looked at; what
+   these checks prove is that the maths and the conventions are right.
+   ========================================================================== */
+
+var CT = S.CalTopo;
+var LAT = 39.865811, LON = -105.216763;   // the project's actual latitude
+
+/* --- destination points: direction and distance both come back --------- */
+[0, 1, 45, 90, 180, 270, 359].forEach(function (brg) {
+  [30, 60, 90, 120].forEach(function (dist) {
+    var p = CT.destination(LAT, LON, brg, dist);
+    var back = CT.distanceM([LON, LAT], p);
+    var bear = CT.bearingDeg([LON, LAT], p);
+    ok('destination ' + brg + '°/' + dist + 'm lands at the right distance',
+      Math.abs(back - dist) < 0.5, back.toFixed(2));
+    ok('destination ' + brg + '°/' + dist + 'm lands on the right bearing',
+      Math.abs(S.angleDiff(bear, brg)) < 0.5, bear.toFixed(3));
+    ok('destination ' + brg + '°/' + dist + 'm is finite and in range',
+      isFinite(p[0]) && isFinite(p[1]) && p[0] >= -180 && p[0] <= 180 && p[1] >= -90 && p[1] <= 90,
+      p.join(','));
+  });
+});
+
+/* Cardinal sanity, in plain terms. */
+var north = CT.destination(LAT, LON, 0, 120);
+ok('000°T moves north and not east', north[1] > LAT && Math.abs(north[0] - LON) < 1e-6,
+  north.join(','));
+var east = CT.destination(LAT, LON, 90, 120);
+ok('090°T moves east and barely north', east[0] > LON && Math.abs(east[1] - LAT) < 1e-5,
+  east.join(','));
+var south = CT.destination(LAT, LON, 180, 120);
+ok('180°T moves south', south[1] < LAT && Math.abs(south[0] - LON) < 1e-6);
+var west = CT.destination(LAT, LON, 270, 120);
+ok('270°T moves west', west[0] < LON && Math.abs(west[1] - LAT) < 1e-5);
+
+/* The north seam: 359 and 001 must straddle north, not jump. */
+var n359 = CT.destination(LAT, LON, 359, 120);
+var n001 = CT.destination(LAT, LON, 1, 120);
+ok('359°T is just west of north', n359[0] < LON && n359[1] > LAT, n359.join(','));
+ok('001°T is just east of north', n001[0] > LON && n001[1] > LAT, n001.join(','));
+ok('359°T and 001°T are near-mirror images about north',
+  Math.abs((LON - n359[0]) - (n001[0] - LON)) < 1e-6);
+ok('the 0/360 seam does not change the answer',
+  CT.destination(LAT, LON, 360, 90)[1].toFixed(6) === CT.destination(LAT, LON, 0, 90)[1].toFixed(6));
+
+/* --- longitude must scale with latitude ---------------------------------- */
+(function () {
+  var d = 120;
+  var atProject = CT.destination(LAT, LON, 90, d)[0] - LON;
+  var naive = d / 111320;                       // degrees if longitude were flat
+  var expected = d / (111320 * Math.cos(LAT * Math.PI / 180));
+  ok('longitude step at 39.9°N matches cos(lat) scaling',
+    Math.abs(atProject - expected) < 2e-6, atProject.toFixed(8) + ' vs ' + expected.toFixed(8));
+  ok('longitude is NOT treated as a constant metres-per-degree',
+    Math.abs(atProject - naive) > 2e-4, 'diff ' + Math.abs(atProject - naive).toFixed(8));
+
+  var atEquator = CT.destination(0, 0, 90, d)[0];
+  var atSixty = CT.destination(60, 0, 90, d)[0];
+  ok('the same distance spans twice the longitude at 60° as at the equator',
+    Math.abs(atSixty / atEquator - 2) < 0.01, (atSixty / atEquator).toFixed(4));
+  ok('latitude steps do not scale with longitude',
+    Math.abs(CT.destination(0, 0, 0, d)[1] - CT.destination(60, 0, 0, d)[1] + 60) < 1e-4);
+})();
+
+/* --- arrow shape ---------------------------------------------------------- */
+[0, 1, 45, 90, 180, 270, 359].forEach(function (brg) {
+  var pos = CT.arrowPositions(LAT, LON, brg, 90);
+  ok('arrow at ' + brg + '°T is one 5-point LineString', pos.length === 5);
+  var tail = pos[0], tip = pos[1], left = pos[2], mid = pos[3], right = pos[4];
+
+  ok('arrow ' + brg + '°T starts at the observation',
+    Math.abs(tail[0] - LON) < 1e-6 && Math.abs(tail[1] - LAT) < 1e-6);
+  ok('arrow ' + brg + '°T points down-wind, not up-wind',
+    Math.abs(S.angleDiff(CT.bearingDeg(tail, tip), brg)) < 0.5,
+    CT.bearingDeg(tail, tip).toFixed(2));
+  ok('arrow ' + brg + '°T is the requested length',
+    Math.abs(CT.distanceM(tail, tip) - 90) < 0.5, CT.distanceM(tail, tip).toFixed(2));
+  ok('arrow ' + brg + '°T returns to the tip between barbs',
+    mid[0] === tip[0] && mid[1] === tip[1]);
+
+  // Barbs sit behind the tip: nearer the tail, and swept back either side.
+  ok('arrow ' + brg + '°T left barb is behind the tip',
+    CT.distanceM(tail, left) < CT.distanceM(tail, tip));
+  ok('arrow ' + brg + '°T right barb is behind the tip',
+    CT.distanceM(tail, right) < CT.distanceM(tail, tip));
+  var headLen = 90 * CT.ARROW.head_fraction;
+  ok('arrow ' + brg + '°T barbs are the configured head length',
+    Math.abs(CT.distanceM(tip, left) - headLen) < 0.5 &&
+    Math.abs(CT.distanceM(tip, right) - headLen) < 0.5,
+    CT.distanceM(tip, left).toFixed(2));
+  var back = (brg + 180) % 360;
+  ok('arrow ' + brg + '°T barbs are swept ±' + CT.ARROW.head_angle_deg + '°',
+    Math.abs(Math.abs(S.angleDiff(CT.bearingDeg(tip, left), back)) - CT.ARROW.head_angle_deg) < 1 &&
+    Math.abs(Math.abs(S.angleDiff(CT.bearingDeg(tip, right), back)) - CT.ARROW.head_angle_deg) < 1);
+  ok('arrow ' + brg + '°T barbs fall either side of the shaft',
+    S.angleDiff(CT.bearingDeg(tip, left), back) * S.angleDiff(CT.bearingDeg(tip, right), back) < 0);
+  pos.forEach(function (c) {
+    ok('arrow ' + brg + '°T coordinate is a finite [lon, lat]',
+      c.length === 2 && isFinite(c[0]) && isFinite(c[1]) &&
+      c[0] >= -180 && c[0] <= 180 && c[1] >= -90 && c[1] <= 90, c.join(','));
+  });
+});
+
+/* --- the convention: toward, never from ----------------------------------- */
+function ctObs(over) {
+  var o = {
+    schema_version: 1, id: 'ct-1', session_id: 'ct-ses', session_name: 'Bear Creek',
+    t: '2026-08-17T14:32:05-06:00', lat: LAT, lon: LON, acc_m: 6,
+    gps_fix_t: '2026-08-17T14:32:04-06:00', gps_fix_age_s: 1,
+    downwind_true: 105, from_true: 285, heading_magnetic_raw: 97, declination: 8,
+    declination_applied: true, bearing_source: 'sensor', bearing_input_ref: 'magnetic',
+    intensity: 'light', speed_mph: null, speed_source: 'estimated', gusty: false,
+    note: '', app_version: 'test'
+  };
+  for (var k in (over || {})) o[k] = over[k];
+  return o;
+}
+var ctx = { searchName: 'Bear Creek 8/17', folderName: 'Handler Training' };
+
+(function () {
+  var f = CT.featureFor(ctObs(), ctx);
+  var c = f.geometry.coordinates;
+  var drawn = CT.bearingDeg(c[0], c[1]);
+  ok('the arrow points along downwind_true (105°T)',
+    Math.abs(S.angleDiff(drawn, 105)) < 0.5, drawn.toFixed(2));
+  ok('the arrow does NOT point along from_true (285°T)',
+    Math.abs(S.angleDiff(drawn, 285)) > 170, drawn.toFixed(2));
+  ok('a wind from the west-north-west draws an arrow to the east-south-east',
+    c[1][0] > c[0][0] && c[1][1] < c[0][1], JSON.stringify(c.slice(0, 2)));
+  ok('the tail is the observation fix',
+    c[0][0] === Math.round(LON * 1e6) / 1e6 && c[0][1] === Math.round(LAT * 1e6) / 1e6);
+})();
+
+/* --- symbolic lengths ------------------------------------------------------ */
+ok('calm is 30 m', CT.lengthFor('calm') === 30);
+ok('light is 60 m', CT.lengthFor('light') === 60);
+ok('moderate is 90 m', CT.lengthFor('moderate') === 90);
+ok('strong is 120 m', CT.lengthFor('strong') === 120);
+[['calm', 30], ['light', 60], ['moderate', 90], ['strong', 120]].forEach(function (pair) {
+  var f = CT.featureFor(ctObs({ intensity: pair[0] }), ctx);
+  var c = f.geometry.coordinates;
+  ok(pair[0] + ' draws a ' + pair[1] + ' m shaft',
+    Math.abs(CT.distanceM(c[0], c[1]) - pair[1]) < 0.5, CT.distanceM(c[0], c[1]).toFixed(2));
+});
+(function () {
+  // A measured speed is metadata. It must not touch the geometry.
+  var plain = CT.featureFor(ctObs({ intensity: 'light' }), ctx);
+  var fast = CT.featureFor(ctObs({ intensity: 'light', speed_mph: 18.4, speed_source: 'measured' }), ctx);
+  ok('a measured wind speed does not change the arrow length',
+    JSON.stringify(plain.geometry) === JSON.stringify(fast.geometry));
+  ok('a measured wind speed is kept in the description',
+    /Measured wind speed: 18\.4 mph/.test(fast.properties.description), fast.properties.description);
+  ok('no measured speed means no speed line',
+    !/Measured wind speed/.test(plain.properties.description));
+})();
+
+/* --- no discernible wind: a point, never an arrow -------------------------- */
+(function () {
+  var none = ctObs({
+    intensity: 'none', downwind_true: null, from_true: null,
+    heading_magnetic_raw: null, bearing_source: null, bearing_input_ref: null,
+    declination_applied: false, t: '2026-08-17T14:45:00-06:00'
+  });
+  var f = CT.featureFor(none, ctx);
+  ok('no discernible wind is a Point', f.geometry.type === 'Point');
+  ok('the point sits on the observation fix',
+    f.geometry.coordinates[0] === Math.round(LON * 1e6) / 1e6 &&
+    f.geometry.coordinates[1] === Math.round(LAT * 1e6) / 1e6);
+  ok('its title says No discernible wind', f.properties.title === '14:45 No discernible wind',
+    f.properties.title);
+  ok('it carries no bearing at all',
+    !/°T/.test(f.properties.title) && !/Wind from|Wind toward/.test(f.properties.description),
+    f.properties.description);
+  ok('it uses point marker properties, not stroke properties',
+    !!f.properties['marker-symbol'] && f.properties.stroke === undefined);
+  ok('a directional feature uses stroke properties, not marker properties',
+    CT.featureFor(ctObs(), ctx).properties['marker-symbol'] === undefined);
+})();
+
+/* --- observations with no usable fix are left out and counted -------------- */
+[[null, null], [undefined, undefined], [NaN, -105.2], [39.8, NaN], [999, -105.2], [39.8, 999]]
+  .forEach(function (pair, i) {
+    var bad = ctObs({ id: 'nofix-' + i, lat: pair[0], lon: pair[1] });
+    ok('an observation with lat=' + pair[0] + ' lon=' + pair[1] + ' makes no geometry',
+      CT.featureFor(bad, ctx) === null);
+  });
+(function () {
+  var mixed = [ctObs({ id: 'a' }), ctObs({ id: 'b', lat: null, lon: null }), ctObs({ id: 'c' })];
+  var built = CT.build(mixed, ctx);
+  ok('only observations with a fix become features', built.geojson.features.length === 2);
+  ok('the ones without a fix are counted', built.skipped === 1);
+  ok('the exported count is reported', built.exported === 2);
+  ok('no feature was placed at 0,0',
+    !JSON.stringify(built.geojson).includes('[0,0]') && !/\[\s*0\s*,\s*0\s*\]/.test(JSON.stringify(built.geojson)));
+})();
+
+/* --- titles ---------------------------------------------------------------- */
+ok('a light observation title reads plainly',
+  CT.titleFor(ctObs({ intensity: 'light' })) === '14:32 Light — from 285°T',
+  CT.titleFor(ctObs({ intensity: 'light' })));
+ok('a calm title pads the bearing to three digits',
+  CT.titleFor(ctObs({ intensity: 'calm', from_true: 41, downwind_true: 221 })) ===
+    '14:32 Calm — from 041°T');
+ok('a moderate title', CT.titleFor(ctObs({ intensity: 'moderate', from_true: 287, downwind_true: 107 })) ===
+  '14:32 Moderate — from 287°T');
+ok('a strong title', CT.titleFor(ctObs({ intensity: 'strong', from_true: 152, downwind_true: 332 })) ===
+  '14:32 Strong — from 152°T');
+ok('every directional title carries °T', /°T$/.test(CT.titleFor(ctObs())));
+
+/* --- description ------------------------------------------------------------ */
+(function () {
+  var d = CT.featureFor(ctObs({ speed_mph: 4.8, speed_source: 'measured', gusty: true }), ctx)
+    .properties.description;
+  ok('description gives wind from in true degrees', /Wind from: 285°T/.test(d), d);
+  ok('description gives wind toward in true degrees', /Wind toward: 105°T/.test(d));
+  ok('description names the intensity', /Intensity: Light/.test(d));
+  ok('description carries the measured speed', /Measured wind speed: 4\.8 mph/.test(d));
+  ok('description flags gusty', /Gusty: Yes/.test(d));
+  ok('description carries the full timestamp', /Observed: 2026-08-17T14:32:05-06:00/.test(d));
+  ok('description carries GPS accuracy', /GPS accuracy: ±6 m/.test(d));
+  ok('description names the search', /Search: Bear Creek 8\/17/.test(d));
+  ok('description names the folder', /Folder: Handler Training/.test(d));
+  ok('description carries the observation id', /Observation ID: ct-1/.test(d));
+  ok('description never shows a magnetic bearing as true',
+    !/°M/.test(d) && !/97/.test(d.replace(/Observation ID:.*/, '')), d);
+
+  var lean = CT.featureFor(ctObs({ acc_m: null }), { searchName: 'Solo' }).properties.description;
+  ok('an absent folder is omitted, not left blank', !/Folder:/.test(lean), lean);
+  ok('an absent GPS accuracy is omitted', !/GPS accuracy/.test(lean));
+  ok('an absent gusty flag is omitted', !/Gusty/.test(lean));
+})();
+
+/* --- the whole file --------------------------------------------------------- */
+(function () {
+  var built = CT.build([ctObs({ id: 'x1' }), ctObs({ id: 'x2', intensity: 'none',
+    downwind_true: null, from_true: null })], ctx);
+  var text = JSON.stringify(built.geojson, null, 2);
+  var parsed = JSON.parse(text);
+  ok('the output parses as JSON', !!parsed);
+  ok('it is a FeatureCollection', parsed.type === 'FeatureCollection');
+  ok('features is an array', Array.isArray(parsed.features));
+  ok('it has no foreign members at the top level',
+    Object.keys(parsed).sort().join(',') === 'features,type', Object.keys(parsed).join(','));
+  parsed.features.forEach(function (f, i) {
+    ok('feature ' + i + ' is a Feature', f.type === 'Feature');
+    ok('feature ' + i + ' has geometry and properties', !!f.geometry && !!f.properties);
+    ok('feature ' + i + ' geometry type is LineString or Point',
+      f.geometry.type === 'LineString' || f.geometry.type === 'Point', f.geometry.type);
+    ok('feature ' + i + ' has a title and description',
+      typeof f.properties.title === 'string' && typeof f.properties.description === 'string');
+  });
+  var line = parsed.features[0];
+  ok('the LineString has the five arrow positions', line.geometry.coordinates.length === 5);
+  ok('stroke properties are the documented simplestyle names',
+    line.properties.stroke === CT.ARROW.stroke &&
+    line.properties['stroke-width'] === CT.ARROW.stroke_width &&
+    line.properties['stroke-opacity'] === CT.ARROW.stroke_opacity &&
+    line.properties.pattern === 'solid');
+  ok('every arrow uses the same colour regardless of intensity',
+    CT.featureFor(ctObs({ intensity: 'calm' }), ctx).properties.stroke ===
+    CT.featureFor(ctObs({ intensity: 'strong' }), ctx).properties.stroke);
+})();
+
+/* --- filenames --------------------------------------------------------------- */
+(function () {
+  var d = new Date(2026, 7, 17);
+  ok('filename carries folder, search and date',
+    CT.filename({ searchName: 'Bear Creek 8/17', folderName: 'Handler Training' }, d) ===
+    'WindMark_Handler-Training_Bear-Creek-8-17_2026-08-17.json',
+    CT.filename({ searchName: 'Bear Creek 8/17', folderName: 'Handler Training' }, d));
+  ok('an unfiled search leaves the folder out',
+    CT.filename({ searchName: 'Loose Search' }, d) === 'WindMark_Loose-Search_2026-08-17.json',
+    CT.filename({ searchName: 'Loose Search' }, d));
+  ok('awkward characters are sanitised',
+    /^WindMark_A-B-C_2026-08-17\.json$/.test(CT.filename({ searchName: 'A/B:C*?"<>|' }, d)),
+    CT.filename({ searchName: 'A/B:C*?"<>|' }, d));
+  ok('the extension is .json', /\.json$/.test(CT.filename({ searchName: 'x' }, d)));
+})();
+
+/* --- names resolved at export time, and legacy records ------------------------ */
+(function () {
+  mem = {};
+  var fol = S.Store.newFolder('Handler Training').folder;
+  var ses = S.Store.newSession('Bear Creek 8/17', fol.id).session;
+  // A legacy observation: no folder existed when it was written, and the name
+  // stored with it is stale.
+  S.Store.addObservation(ctObs({ id: 'leg-1', session_id: ses.id, session_name: 'Old Name' }));
+
+  function exportNow() {
+    var live = S.Store.getSessions().filter(function (x) { return x.id === ses.id; })[0];
+    return CT.build(S.Store.getObservations(ses.id), {
+      searchName: live.name, folderName: S.Store.folderName(live.folder_id)
+    });
+  }
+  var before = exportNow();
+  ok('a legacy observation still exports', before.exported === 1 && before.skipped === 0);
+  ok('the description uses the current search name, not the stored one',
+    /Search: Bear Creek 8\/17/.test(before.geojson.features[0].properties.description) &&
+    !/Old Name/.test(before.geojson.features[0].properties.description));
+
+  S.Store.renameFolder(fol.id, 'Missions');
+  S.Store.renameSession(ses.id, 'Bear Creek 08-17');
+  var after = exportNow();
+  var d2 = after.geojson.features[0].properties.description;
+  ok('a folder rename is reflected in the next export', /Folder: Missions/.test(d2), d2);
+  ok('a search rename is reflected in the next export', /Search: Bear Creek 08-17/.test(d2));
+  ok('the stored observation was not rewritten',
+    S.Store.getObservation('leg-1').session_name === 'Old Name');
+  ok('geometry is identical before and after the renames',
+    JSON.stringify(before.geojson.features[0].geometry) ===
+    JSON.stringify(after.geojson.features[0].geometry));
+})();
+
+/* --- the export module reaches no network ------------------------------------- */
+(function () {
+  var src = fs.readFileSync(path.join(root, 'js/caltopo.js'), 'utf8');
+  ok('caltopo.js makes no network call',
+    !/fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|import\s*\(/.test(src));
+  ok('caltopo.js loads no library', !/https?:\/\/[^\s"']*\.js/.test(src));
 })();
 
 console.log(passes + ' passed, ' + fails + ' failed');

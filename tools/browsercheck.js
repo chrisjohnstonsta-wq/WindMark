@@ -502,6 +502,81 @@ const CHROMIUM = process.env.CHROMIUM_PATH || undefined;
   ok('the search that used to be in it survives', (await sessionsOf()).some(s => s.id === bearId));
   plan = null;
 
+  // ---- 12. CalTopo export from the real UI ----
+  const seeded = await page.evaluate(() => {
+    const fol = Store.newFolder('Export Test').folder;
+    const ses = Store.newSession('Arrow Search', fol.id).session;
+    const base = {
+      schema_version: 1, session_id: ses.id, session_name: 'Arrow Search',
+      lat: 39.865811, lon: -105.216763, acc_m: 6,
+      gps_fix_t: '2026-08-17T14:32:04-06:00', gps_fix_age_s: 1, declination: 8,
+      declination_applied: true, bearing_source: 'sensor', bearing_input_ref: 'magnetic',
+      speed_source: 'estimated', gusty: false, note: '', app_version: 'test'
+    };
+    const mk = (o) => Object.assign({}, base, o);
+    Store.addObservation(mk({ id: 'ct-line', t: '2026-08-17T14:32:05-06:00',
+      intensity: 'light', downwind_true: 105, from_true: 285, heading_magnetic_raw: 97 }));
+    Store.addObservation(mk({ id: 'ct-point', t: '2026-08-17T14:45:00-06:00',
+      intensity: 'none', downwind_true: null, from_true: null, heading_magnetic_raw: null,
+      bearing_source: null, bearing_input_ref: null, declination_applied: false }));
+    Store.addObservation(mk({ id: 'ct-nogps', t: '2026-08-17T14:51:00-06:00',
+      intensity: 'strong', downwind_true: 332, from_true: 152, lat: null, lon: null }));
+    return { sesId: ses.id, folderId: fol.id };
+  });
+
+  // The folder tests above leave us on the searches list; get back to capture
+  // first so the entry point under test is the real one.
+  if (await page.isVisible('#btn-new-folder')) {
+    await page.click('#btn-sessions-back'); await page.waitForTimeout(200);
+  }
+  await page.click('#btn-to-sessions'); await page.waitForTimeout(300);
+  await page.click(`#sessions-body [data-session="${seeded.sesId}"]`); await page.waitForTimeout(300);
+  ok('the search screen offers a CalTopo export', await page.isVisible('#btn-export-caltopo'));
+  ok('the search screen still offers both CSVs',
+    (await page.isVisible('#btn-export-op')) && (await page.isVisible('#btn-export-prov-one')));
+  ok('the export block explains that length is not a distance',
+    /not a scent distance|not a .*distance/i.test(await page.textContent('#search-body')));
+
+  // Clicking it really produces a file, through the same path the CSVs use.
+  seen.length = 0; plan = null;
+  let download = null;
+  try {
+    const [dl] = await Promise.all([
+      page.waitForEvent('download', { timeout: 8000 }),
+      page.click('#btn-export-caltopo')
+    ]);
+    download = dl;
+  } catch (e) { /* reported below */ }
+  ok('exporting produces a downloadable file', !!download);
+  if (download) {
+    const name = download.suggestedFilename();
+    ok('the file is named for the folder, search and date',
+      /^WindMark_Export-Test_Arrow-Search_\d{4}-\d{2}-\d{2}\.json$/.test(name), name);
+    const fsp = require('fs');
+    const p = await download.path();
+    const text = fsp.readFileSync(p, 'utf8');
+    const gj = JSON.parse(text);
+    ok('the exported file parses as a FeatureCollection',
+      gj.type === 'FeatureCollection' && Array.isArray(gj.features));
+    ok('the observation without GPS produced no geometry', gj.features.length === 2,
+      String(gj.features.length));
+    const line = gj.features.find(f => f.geometry.type === 'LineString');
+    const point = gj.features.find(f => f.geometry.type === 'Point');
+    ok('the directional observation is a 5-point LineString',
+      !!line && line.geometry.coordinates.length === 5);
+    ok('no discernible wind is a Point titled as such',
+      !!point && /No discernible wind/.test(point.properties.title), point && point.properties.title);
+    ok('the arrow points downwind, not upwind', (() => {
+      const c = line.geometry.coordinates;
+      return c[1][0] > c[0][0] && c[1][1] < c[0][1];   // 105°T = east-south-east
+    })());
+    ok('the description carries the current folder and search',
+      /Folder: Export Test/.test(line.properties.description) &&
+      /Search: Arrow Search/.test(line.properties.description));
+  }
+  ok('the handler is told an observation could not be mapped',
+    seen.some(m => /1 observation had no GPS coordinates/.test(m)), seen.join(' | '));
+
   console.log(pass + ' passed, ' + fail + ' failed');
   console.log('page errors:', errors.length ? errors : 'none');
   await browser.close();

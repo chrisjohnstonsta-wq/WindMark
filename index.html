@@ -272,9 +272,17 @@
 
   <div class="set-group">
     <div class="set-label">DATA</div>
+    <button class="btn btn-wide" id="btn-settings-caltopo">CALTOPO .JSON (THIS SEARCH)</button>
     <button class="btn btn-wide" id="btn-settings-export">EXPORT CSV (THIS SEARCH)</button>
     <button class="btn btn-wide" id="btn-export-all">EXPORT CSV (ALL SEARCHES)</button>
     <button class="btn btn-wide" id="btn-export-prov">PROVENANCE CSV (ALL, WITH RAW °M)</button>
+    <div class="set-help">
+      The CalTopo file draws one wind arrow per observation, pointing the way the wind is
+      blowing, for import into the CalTopo app over your search track. Arrow length encodes
+      the intensity category only — it is not a scent distance, plume length, or wind speed.
+      Observations with no discernible wind become a point marker, and any observation
+      without GPS coordinates is left out and counted.
+    </div>
     <div class="set-help">
       The standard CSV carries wind direction in true degrees only, in columns named
       <b>wind_from_deg_true</b> and <b>wind_toward_deg_true</b>. The provenance file adds the
@@ -347,6 +355,7 @@
 <script src="js/store.js"></script>
 <script src="js/sensors.js"></script>
 <script src="js/offline.js"></script>
+<script src="js/caltopo.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

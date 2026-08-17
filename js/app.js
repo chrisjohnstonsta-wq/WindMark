@@ -736,6 +736,16 @@ var App = (function () {
     html += '</div>';
     html += '<button class="btn btn-wide" id="btn-move-new-folder">MOVE TO A NEW FOLDER…</button>';
 
+    if (n > 0) {
+      html += '<div class="set-label">EXPORT</div>' +
+        '<button class="btn btn-wide" id="btn-export-caltopo">CALTOPO (.JSON)</button>' +
+        '<button class="btn btn-wide" id="btn-export-op">OPERATIONAL CSV</button>' +
+        '<button class="btn btn-wide" id="btn-export-prov-one">PROVENANCE CSV</button>' +
+        '<div class="set-help">CalTopo file: one wind arrow per observation, pointing the ' +
+        'way the wind is blowing. Arrow length is the intensity category only — not a ' +
+        'scent distance, plume length, or wind speed.</div>';
+    }
+
     // An empty search has nothing to clear, so the control is not offered.
     if (n > 0) {
       html += '<button class="btn btn-wide btn-danger" id="btn-clear-obs">CLEAR OBSERVATIONS (' + n + ')</button>';
@@ -785,6 +795,16 @@ var App = (function () {
       if (err) alert(err);
       renderSearchManage();
     });
+
+    if (el('btn-export-caltopo')) {
+      el('btn-export-caltopo').addEventListener('click', function () { exportCalTopo(ses.id); });
+      el('btn-export-op').addEventListener('click', function () {
+        exportCSV(Store.getObservations(ses.id), ses.name);
+      });
+      el('btn-export-prov-one').addEventListener('click', function () {
+        exportCSV(Store.getObservations(ses.id), ses.name, true);
+      });
+    }
 
     if (el('btn-clear-obs')) {
       el('btn-clear-obs').addEventListener('click', function () {
@@ -998,19 +1018,14 @@ var App = (function () {
       pad2(d.getHours()) + pad2(d.getMinutes()) + '.csv';
   }
 
-  /* provenance = true exports the debugging file (raw magnetic included).
-     The default export carries true-referenced wind bearings only. */
-  function exportCSV(observations, label, provenance) {
-    if (!observations.length) { alert('Nothing to export in ' + label + '.'); return; }
-    var csv = provenance ? Store.toProvenanceCSV(observations) : Store.toCSV(observations);
-    var name = csvFilename(label + (provenance ? '-provenance' : ''));
-    var blob = new Blob([csv], { type: 'text/csv' });
-
-    // Preferred on iOS: share sheet with the file attached (Save to Files,
-    // Mail, AirDrop). Works with no connectivity.
+  /* One file-out path for every export format. Preferred on iOS: the share
+     sheet with the file attached (Save to Files, Mail, AirDrop), which works
+     with no connectivity at all; otherwise a plain download. */
+  function shareFile(text, name, mime) {
+    var blob = new Blob([text], { type: mime });
     try {
       if (navigator.canShare && window.File) {
-        var file = new File([blob], name, { type: 'text/csv' });
+        var file = new File([blob], name, { type: mime });
         if (navigator.canShare({ files: [file] })) {
           navigator.share({ files: [file], title: name }).catch(function (e) {
             if (e && e.name === 'AbortError') return;
@@ -1021,6 +1036,44 @@ var App = (function () {
       }
     } catch (e) { /* fall through to download */ }
     downloadBlob(blob, name);
+  }
+
+  /* provenance = true exports the debugging file (raw magnetic included).
+     The default export carries true-referenced wind bearings only. */
+  function exportCSV(observations, label, provenance) {
+    if (!observations.length) { alert('Nothing to export in ' + label + '.'); return; }
+    var csv = provenance ? Store.toProvenanceCSV(observations) : Store.toCSV(observations);
+    shareFile(csv, csvFilename(label + (provenance ? '-provenance' : '')), 'text/csv');
+  }
+
+  /* CalTopo / GeoJSON for one search: wind arrows pointing the way the wind
+     is blowing, built entirely from what is already on the phone. */
+  function exportCalTopo(sessionId) {
+    var ses = Store.getSessions().filter(function (x) { return x.id === sessionId; })[0];
+    if (!ses) { alert('Search not found.'); return; }
+
+    var obs = Store.getObservations(ses.id);
+    if (!obs.length) { alert('Nothing to export in ' + ses.name + '.'); return; }
+
+    // Names are resolved now, so a renamed folder or search is reflected in
+    // this file without any stored observation being touched.
+    var ctx = { searchName: ses.name, folderName: Store.folderName(ses.folder_id) };
+    var built = CalTopo.build(obs, ctx);
+
+    if (!built.exported) {
+      alert('None of the ' + obs.length + ' observation' + (obs.length === 1 ? '' : 's') +
+        ' in "' + ses.name + '" has usable coordinates, so there is nothing to map.');
+      return;
+    }
+    // An observation with no fix is never given one — it is left out and
+    // counted, out loud.
+    if (built.skipped) {
+      alert(built.skipped + ' observation' + (built.skipped === 1 ? '' : 's') +
+        ' had no GPS coordinates and could not be mapped.\n' +
+        built.exported + ' exported. The CSV exports still contain everything.');
+    }
+    shareFile(JSON.stringify(built.geojson, null, 2),
+      CalTopo.filename(ctx, new Date()), 'application/json');
   }
 
   function downloadBlob(blob, name) {
@@ -1269,6 +1322,9 @@ var App = (function () {
     el('btn-vibe').addEventListener('click', function () {
       settings.vibrate = !settings.vibrate; saveSettings();
       if (settings.vibrate) buzz([40, 40, 40]);
+    });
+    el('btn-settings-caltopo').addEventListener('click', function () {
+      exportCalTopo(session.id);
     });
     el('btn-settings-export').addEventListener('click', function () {
       exportCSV(Store.getObservations(session.id), session.name);

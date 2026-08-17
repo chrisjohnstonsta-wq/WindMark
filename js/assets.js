@@ -10,7 +10,7 @@
    from it, so a new version always installs into its own cache and can never
    be reported as offline-ready until that cache is complete. */
 
-var WM_VERSION = '1.5.1';
+var WM_VERSION = '1.6.0';
 var WM_CACHE_NAME = 'windmark-v' + WM_VERSION;
 
 var WM_ASSETS = [
@@ -22,6 +22,7 @@ var WM_ASSETS = [
   'js/store.js',
   'js/sensors.js',
   'js/offline.js',
+  'js/caltopo.js',
   'js/app.js',
   'manifest.webmanifest',
   'icons/icon-192.png',

@@ -280,7 +280,7 @@ BEARING does not exist on a no-discernible-wind observation.
   "speed_source": "estimated",
   "gusty": false,
   "note": "",
-  "app_version": "1.5.1"
+  "app_version": "1.6.0"
 }
 ```
 
@@ -363,6 +363,104 @@ likewise deliberately out of scope here.
 
 ---
 
+## CalTopo export (Phase 2A — geometry not yet validated on a map)
+
+`CALTOPO (.JSON)` on a search's screen, and in Settings for the active search, writes a
+GeoJSON FeatureCollection of wind arrows for import into the CalTopo mobile app over an
+existing search track. Built entirely on the phone from stored observations: no server,
+no account, no CalTopo API, no network call, no library. It works in airplane mode and
+uses the same share sheet the CSV exports use.
+
+> **Not validated yet.** These arrows have not been imported into the CalTopo iPhone app
+> and looked at. The maths and the conventions are covered by tests; whether CalTopo
+> renders them the way a handler expects is an open question until someone imports a real
+> file and sees it.
+
+### Direction
+
+The arrow points **`downwind_true`** — the way the wind, and therefore scent, is
+travelling — with its **tail on the observation's GPS position**. A wind *from* 285°T
+draws an arrow pointing 105°T. `from_true` appears in the title and description because
+that is how people speak and write it, but it is never the direction of the geometry.
+
+### Geometry
+
+One observation is one map object: a single LineString that doubles back on itself so
+CalTopo shows one shape, not three.
+
+```
+positions: [tail, tip, left barb, tip, right barb]
+
+tail ──────────────▶ tip
+                     ├── barb at (downwind + 180 − 30)°
+                     └── barb at (downwind + 180 + 30)°
+```
+
+Every point is a geodesic destination — great-circle bearing and distance on a sphere of
+radius 6 371 008.8 m — not a flat offset, so longitude scales correctly with latitude
+(120 m due east spans 0.001402° of longitude at 39.9°N, not the 0.001078° a fixed
+metres-per-degree constant would give) and the 0/360 seam is a non-event. Coordinates are
+rounded to six decimals, about 0.1 m.
+
+Barbs are measured back from the tip along the reversed shaft, so they are always behind
+it. Everything tunable sits in `CalTopo.ARROW`: `head_fraction` 0.28, `head_angle_deg` 30,
+the stroke colour, and the lengths below.
+
+### Symbolic lengths
+
+| Intensity | Arrow |
+|---|---|
+| Calm | 30 m |
+| Light | 60 m |
+| Moderate | 90 m |
+| Strong | 120 m |
+
+**Visual encoding only.** Not scent travel distance, not plume length, not dog detection
+range, not duration, not wind speed. A measured wind speed, when present, is metadata in
+the description and does not change the geometry by a metre — verified by a test that
+compares the geometry of the same observation with and without one.
+
+### Features and properties
+
+Directional observations are `LineString` features:
+
+```json
+{
+  "title": "14:32 Light — from 285°T",
+  "description": "Wind from: 285°T\nWind toward: 105°T\nIntensity: Light\n…",
+  "stroke": "#4a90e2",
+  "stroke-width": 3,
+  "stroke-opacity": 1,
+  "pattern": "solid"
+}
+```
+
+One colour for every arrow — intensity is already encoded by length. No-discernible-wind
+observations are `Point` features with `marker-color` / `marker-symbol` / `marker-size`
+and the title `14:45 No discernible wind`: no bearing is invented, no zero-degree arrow is
+drawn, and no previous heading is reused. Properties are limited to simplestyle names
+CalTopo is known to read; nothing undocumented is invented, and the file has no foreign
+members beyond `type` and `features`. Automatic placement into a CalTopo folder is
+deliberately not attempted in this pass.
+
+The description carries `Wind from`, `Wind toward`, `Intensity`, and — when present —
+`Measured wind speed`, `Gusty`, `Observed`, `GPS accuracy`, `Search`, `Folder`, and
+`Observation ID`. Absent fields are omitted rather than shown empty, and no magnetic
+bearing appears: what reaches the map is true-referenced throughout.
+
+### Files and coverage
+
+`WindMark_<folder>_<search>_<YYYY-MM-DD>.json`, with anything awkward in a filename
+reduced to a hyphen and the folder omitted when the search is unfiled. Folder and search
+names are resolved at export time, so a rename shows up in the next file without touching
+a stored observation.
+
+An observation without valid finite coordinates gets no geometry: it is not fabricated,
+not parked at 0,0, and not silently dropped — it is left out and the handler is told how
+many could not be mapped. The CSV exports still contain everything.
+
+---
+
 ## Offline / install
 
 A search happens with no cell service, no Wi-Fi, and often in airplane mode. Service
@@ -381,7 +479,7 @@ line:
 
 ```
 OFFLINE READY ✓
-WindMark v1.5.1 cached locally
+WindMark v1.6.0 cached locally
 ```
 
 or
@@ -404,7 +502,7 @@ all four of:
 the service worker (`importScripts`), so the check and the cache can never disagree
 about what "cached" means. Because the cache name carries the version, a half-installed
 update cannot masquerade as ready: v1.5.0 asks for the v1.5.0 cache and gets `NOT READY`
-until that cache is complete, while v1.5.1 keeps working from its own.
+until that cache is complete, while v1.6.0 keeps working from its own.
 
 ### PRE-SEARCH CHECK
 
@@ -515,6 +613,7 @@ js/util.js                bearings, circular mean, declination rule, time format
 js/store.js               localStorage, sessions, schema, CSV
 js/sensors.js             compass + GPS, heavily commented orientation math
 js/offline.js             offline-readiness verdict and the pre-search check
+js/caltopo.js             CalTopo/GeoJSON wind arrows — geodesic geometry, no map
 js/app.js                 capture flow and UI
 sw.js                     offline cache
 manifest.webmanifest      PWA manifest
@@ -532,15 +631,16 @@ rule, the downwind/from convention, the Euler-to-heading math, bearing labelling
 source-specific sensor reference, the compass authority rule, the bearing/intensity
 invariant across edits, manual-entry range rejection, wording, the true-only export
 rule, the offline-readiness verdict, the pre-search states, the speed-source rename and
-its migration, the folder/search organisation with its destructive-prompt wording, and
-that the cached asset list matches both what the page loads and what is on disk
-(312 checks). It drives the
+its migration, the folder/search organisation with its destructive-prompt wording, the
+CalTopo arrow geometry across seven bearings including the north seam, and that the
+cached asset list matches both what the page loads and what is on disk (606 checks). It drives the
 compass with synthetic orientation events through the real listeners.
 
 Two optional Playwright harnesses cover what needs a real browser:
-`tools/browsercheck.js` (160 checks — screen flow, edit transitions, input rejection,
-one-viewport layout, and the organisational UI including refused confirmations) and
-`tools/offlinecheck.js` (35 checks — real Cache Storage, offline cold start, a
+`tools/browsercheck.js` (172 checks — screen flow, edit transitions, input rejection,
+one-viewport layout, the organisational UI including refused confirmations, and a real
+CalTopo file downloaded from the real button) and `tools/offlinecheck.js` (38 checks —
+real Cache Storage, offline cold start, CalTopo generation with the network down, a
 deliberately broken update, third-party request tracking). Neither can verify the
 physical sensor — that still requires the walk outside with a compass.
 
@@ -581,6 +681,11 @@ Software-verifiable, checked in a Chromium harness with faked sensors:
 - [x] CSV export works offline
 
 Requires the phone, outdoors:
+
+- [ ] **A CalTopo file imported into the CalTopo iPhone app and looked at** — arrows
+      pointing the way the wind was blowing, lengths distinguishable, titles readable in
+      the map-object list, no-wind points visible, and the whole thing legible over a
+      real search track
 
 - [ ] Sensor bearing agrees with the compass to ~±10° after declination, on multiple
       headings including around north

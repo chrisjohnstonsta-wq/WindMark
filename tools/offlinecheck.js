@@ -146,6 +146,23 @@ const server = http.createServer((req, res) => {
   ok('offline CSV header still carries only true bearings',
     /wind_from_deg_true/.test(csv) && !/magnetic/i.test(csv.split('\r\n')[0]));
 
+  // CalTopo GeoJSON is built from stored observations alone — no connectivity.
+  const geo = await cold.evaluate(() => {
+    const ses = Store.getActiveSession();
+    const built = CalTopo.build(Store.getObservations(ses.id), {
+      searchName: ses.name, folderName: Store.folderName(ses.folder_id)
+    });
+    return { text: JSON.stringify(built.geojson), exported: built.exported, skipped: built.skipped,
+             name: CalTopo.filename({ searchName: ses.name }, new Date()) };
+  });
+  const gjOffline = JSON.parse(geo.text);
+  ok('CalTopo GeoJSON is generated with the network down',
+    gjOffline.type === 'FeatureCollection' && Array.isArray(gjOffline.features));
+  ok('every offline observation with a fix became a feature',
+    gjOffline.features.length === geo.exported && geo.exported > 0,
+    geo.exported + '/' + geo.skipped);
+  ok('the offline filename is a .json for this search', /^WindMark_.*\.json$/.test(geo.name), geo.name);
+
   // ---- pre-search check renders, and reflects reality ----
   await cold.click('#btn-to-settings'); await cold.waitForTimeout(500);
   const checks = await cold.$$eval('#set-checks .check', els => els.map(e => ({
