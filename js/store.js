@@ -180,6 +180,27 @@ var Store = (function () {
     return null;
   }
 
+  /* ---------- speed source ------------------------------------------------
+
+     'measured' means a real anemometer reading was typed in; 'estimated'
+     means the qualitative category only. Older records wrote 'kestrel' for
+     the same thing — one brand of anemometer — which told the reader nothing
+     the number did not. Same meaning, so old records are rewritten once
+     rather than left to produce a CSV with two spellings of one concept. */
+
+  function normalizeSpeedSource(v) { return v === 'kestrel' ? 'measured' : v; }
+
+  /* Returns null on success (including nothing to do), or an error string. */
+  function migrateSpeedSource() {
+    var all = getAllObservations();
+    var changed = 0;
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].speed_source === 'kestrel') { all[i].speed_source = 'measured'; changed++; }
+    }
+    if (!changed) return null;
+    return writeJSON(K_OBS, all);
+  }
+
   /* ---------- observations ---------------------------------------------- */
 
   function getAllObservations() {
@@ -268,7 +289,7 @@ var Store = (function () {
     ['bearing_source', function (o) { return o.bearing_source; }],
     ['intensity', function (o) { return o.intensity; }],
     ['speed_mph', function (o) { return o.speed_mph; }],
-    ['speed_source', function (o) { return o.speed_source; }],
+    ['speed_source', function (o) { return normalizeSpeedSource(o.speed_source); }],
     ['gusty', function (o) { return o.gusty; }],
     ['note', function (o) { return o.note; }],
     ['app_version', function (o) { return o.app_version; }]
@@ -345,6 +366,7 @@ var Store = (function () {
     getAllObservations: getAllObservations, getObservations: getObservations,
     getObservation: getObservation, addObservation: addObservation,
     updateObservation: updateObservation, deleteObservation: deleteObservation,
+    normalizeSpeedSource: normalizeSpeedSource, migrateSpeedSource: migrateSpeedSource,
     isDirectional: isDirectional, noDirectionFields: noDirectionFields,
     hasBearing: hasBearing, validateObservation: validateObservation,
     toCSV: toCSV, toProvenanceCSV: toProvenanceCSV,

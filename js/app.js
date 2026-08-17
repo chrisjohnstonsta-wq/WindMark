@@ -267,7 +267,7 @@ var App = (function () {
 
       intensity: intensity,
       speed_mph: mph,
-      speed_source: mph === null ? 'estimated' : 'kestrel',
+      speed_source: mph === null ? 'estimated' : 'measured',
       gusty: !!pending.gusty,
       note: '',
       app_version: WM_VERSION
@@ -292,7 +292,7 @@ var App = (function () {
       : 'FROM ' + bearingText(rec.from_true, 'true') + ' · ' + INTENSITY_LABEL[intensity];
     var sub = [];
     if (rec.gusty) sub.push('GUSTY');
-    if (rec.speed_mph !== null) sub.push(rec.speed_mph + ' mph (Kestrel)');
+    if (rec.speed_mph !== null) sub.push(rec.speed_mph + ' mph measured');
     sub.push(rec.acc_m === null ? 'no GPS' : '±' + Math.round(rec.acc_m) + ' m');
     if (rec.bearing_source === 'manual') sub.push('bearing by hand');
 
@@ -498,7 +498,7 @@ var App = (function () {
         : 'WIND FROM ' + bearingText(o.from_true, 'true')) + '</div>';
     html += '<div class="detail-sub">' + esc(INTENSITY_LABEL[o.intensity] || o.intensity) +
       (o.gusty ? ' · GUSTY' : '') +
-      (o.speed_mph !== null && o.speed_mph !== undefined ? ' · ' + o.speed_mph + ' mph Kestrel' : '') +
+      (o.speed_mph !== null && o.speed_mph !== undefined ? ' · ' + o.speed_mph + ' mph measured' : '') +
       '</div>';
 
     html += row('time', o.t);
@@ -511,7 +511,7 @@ var App = (function () {
     html += row('raw input (provenance)', o.heading_magnetic_raw === null || o.heading_magnetic_raw === undefined
       ? '—' : bearingText(o.heading_magnetic_raw, 'magnetic'));
     html += row('declination', o.declination + '°' + (o.declination_applied ? ' (applied)' : ' (not applied)'));
-    html += row('speed source', o.speed_source);
+    html += row('speed source', Store.normalizeSpeedSource(o.speed_source));
     html += row('lat, lon', (o.lat === null || o.lat === undefined) ? '—' :
       (Math.round(o.lat * 1e6) / 1e6) + ', ' + (Math.round(o.lon * 1e6) / 1e6));
     html += row('gps accuracy', o.acc_m === null || o.acc_m === undefined ? '—' : '±' + o.acc_m + ' m');
@@ -538,7 +538,7 @@ var App = (function () {
         ? '<div class="set-help">No discernible wind carries no bearing. Choose a directional intensity above to add one.</div>'
         : '');
 
-    html += '<div class="set-label">KESTREL mph</div>' +
+    html += '<div class="set-label">MEASURED WIND SPEED mph</div>' +
       '<div class="fix-grid2"><input id="fix-mph" class="mph-input wide" type="number" inputmode="decimal" step="0.1" min="0" value="' +
       (o.speed_mph === null || o.speed_mph === undefined ? '' : esc(o.speed_mph)) +
       '" placeholder="—"><button class="btn btn-fix" id="btn-fix-mph">SET SPEED</button></div>';
@@ -618,7 +618,7 @@ var App = (function () {
       if (v !== null && (!isFinite(v) || v < 0)) { alert('Enter a valid speed.'); return; }
       var err = Store.updateObservation(detailId, {
         speed_mph: v,
-        speed_source: v === null ? 'estimated' : 'kestrel'
+        speed_source: v === null ? 'estimated' : 'measured'
       });
       if (err) alert(err);
       renderDetail();
@@ -1118,6 +1118,7 @@ var App = (function () {
   function init() {
     settings = Store.getSettings();
     var storageErr = Store.selfTest();
+    Store.migrateSpeedSource();   // one-time rename of the legacy speed_source value
     session = Store.getActiveSession();
     refreshCount();
 

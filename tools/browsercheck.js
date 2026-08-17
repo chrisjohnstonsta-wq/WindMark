@@ -92,6 +92,31 @@ const CHROMIUM = process.env.CHROMIUM_PATH || undefined;
     none.heading_magnetic_raw === null && none.bearing_source === null &&
     none.bearing_input_ref === null && none.declination_applied === false, JSON.stringify(none.bearing_source));
 
+  // ---- 3b. a typed speed is "measured", with no brand name in sight ----
+  await page.click('#btn-mark'); await page.waitForTimeout(120);
+  ok('the speed field is labelled MEASURED',
+    /MEASURED/.test(await page.textContent('.mph-label')), await page.textContent('.mph-label'));
+  ok('no brand name on the intensity screen',
+    !/kestrel/i.test(await page.textContent('#screen-intensity')));
+  await page.fill('#in-mph', '7.8');
+  await page.click('[data-entryref="true"]').catch(() => {});
+  await page.click('#btn-change-bearing'); await page.waitForTimeout(150);
+  await page.click('[data-entryref="true"]');
+  await page.fill('#in-manual', '284');
+  await page.click('#btn-manual-ok'); await page.waitForTimeout(150);
+  await page.fill('#in-mph', '7.8');
+  await page.click('[data-intensity="light"]'); await page.waitForTimeout(250);
+  ok('the confirmation says the speed was measured',
+    /7\.8 mph measured/.test(await page.textContent('#ov-sub')), await page.textContent('#ov-sub'));
+  await page.click('#btn-ov-done');
+  obs = await dump();
+  const measured = obs[obs.length - 1];
+  ok('a typed speed stores speed_source "measured"', measured.speed_source === 'measured',
+    String(measured.speed_source));
+  ok('the number itself is stored unchanged', measured.speed_mph === 7.8, String(measured.speed_mph));
+  ok('no stored record mentions a brand name',
+    !/kestrel/i.test(JSON.stringify(obs)));
+
   // ---- 4. directional with no bearing must go through manual entry ----
   await page.click('#btn-mark'); await page.waitForTimeout(120);
   await page.click('[data-intensity="moderate"]'); await page.waitForTimeout(250);

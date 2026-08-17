@@ -336,6 +336,49 @@ ok('editing none -> moderate with a bearing in the same write succeeds',
 ok('attaching a bearing alone to a none observation is refused',
   S.Store.updateObservation('obs-dir', { downwind_true: 10, from_true: 190 }) !== null);
 
+/* --- speed source: measured, never a brand name --------------------------- */
+mem = {};
+var spdSes = S.Store.newSession('Speeds').session;
+function speedRec(id, src, mph) {
+  return {
+    schema_version: 1, id: id, session_id: spdSes.id, session_name: 'Speeds',
+    t: '2026-08-16T20:00:00-06:00', lat: null, lon: null, acc_m: null,
+    gps_fix_t: null, gps_fix_age_s: null,
+    downwind_true: 105, from_true: 285, heading_magnetic_raw: 97, declination: 8,
+    declination_applied: true, bearing_source: 'sensor', bearing_input_ref: 'magnetic',
+    intensity: 'moderate', speed_mph: mph, speed_source: src, gusty: false,
+    note: '', app_version: 'test'
+  };
+}
+ok('legacy "kestrel" normalises to "measured"', S.Store.normalizeSpeedSource('kestrel') === 'measured');
+ok('"measured" is left alone', S.Store.normalizeSpeedSource('measured') === 'measured');
+ok('"estimated" is left alone', S.Store.normalizeSpeedSource('estimated') === 'estimated');
+
+S.Store.addObservation(speedRec('spd-legacy', 'kestrel', 7.8));
+S.Store.addObservation(speedRec('spd-new', 'measured', 4.2));
+S.Store.addObservation(speedRec('spd-est', 'estimated', null));
+
+var opCsv = S.Store.toCSV(S.Store.getObservations(spdSes.id));
+var prCsv = S.Store.toProvenanceCSV(S.Store.getObservations(spdSes.id));
+ok('operational CSV never exports a brand name', !/kestrel/i.test(opCsv), opCsv.slice(0, 120));
+ok('provenance CSV never exports a brand name', !/kestrel/i.test(prCsv));
+ok('operational CSV reports measured speeds as "measured"',
+  (opCsv.match(/measured/g) || []).length === 2, String((opCsv.match(/measured/g) || []).length));
+ok('estimated rows stay estimated', /estimated/.test(opCsv));
+
+ok('migration rewrites legacy records', S.Store.migrateSpeedSource() === null);
+ok('the legacy record now stores "measured"',
+  S.Store.getObservation('spd-legacy').speed_source === 'measured');
+ok('the already-correct record is untouched',
+  S.Store.getObservation('spd-new').speed_source === 'measured');
+ok('an estimated record is untouched',
+  S.Store.getObservation('spd-est').speed_source === 'estimated');
+ok('the measured number itself is never altered',
+  S.Store.getObservation('spd-legacy').speed_mph === 7.8);
+ok('migration is a no-op the second time', S.Store.migrateSpeedSource() === null);
+ok('no stored record mentions a brand name',
+  !/kestrel/i.test(JSON.stringify(S.Store.getAllObservations())));
+
 /* --- session rename shows up in the next export --------------------------- */
 mem = {};
 var ses2 = S.Store.newSession('Search 1').session;
@@ -358,6 +401,15 @@ ok('intensity label is NO DISCERNIBLE WIND', S.INTENSITY_LABEL.none === 'NO DISC
   var text = fs.readFileSync(path.join(root, f), 'utf8');
   var hits = text.match(/\bno wind\b/gi);
   ok('no "no wind" shorthand in ' + f, !hits, hits ? hits.join(', ') : '');
+});
+
+/* Instrument brands tell the handler nothing: the app says "compass" and
+   "measured". The only allowed mention of the old value is the migration that
+   rewrites it. */
+['index.html', 'js/app.js', 'js/util.js', 'js/sensors.js', 'js/offline.js'].forEach(function (f) {
+  var text = fs.readFileSync(path.join(root, f), 'utf8');
+  ok('no instrument brand names in ' + f, !/silva|kestrel/i.test(text),
+    (text.match(/silva|kestrel/gi) || []).join(', '));
 });
 
 /* --- manual entry rejects out-of-range values ------------------------------ */

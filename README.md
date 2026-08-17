@@ -19,7 +19,7 @@ Target platform: iPhone / Safari / installed PWA. Android Chrome is secondary.
 4. The observation is written to storage, then a full-screen **SAVED** confirmation
    appears with an **UNDO** button.
 
-Two taps. Optional extras (GUSTY toggle, Kestrel mph) sit above the intensity buttons
+Two taps. Optional extras (GUSTY toggle, measured mph) sit above the intensity buttons
 and are set before the intensity tap that commits.
 
 Nothing is ever auto-captured. Nothing is saved without an intensity tap.
@@ -215,22 +215,24 @@ BEARING does not exist on a no-discernible-wind observation.
   "speed_source": "estimated",
   "gusty": false,
   "note": "",
-  "app_version": "1.4.2"
+  "app_version": "1.4.3"
 }
 ```
 
 * `intensity`: `none` | `calm` | `light` | `moderate` | `strong`
 * `bearing_source`: `sensor` | `manual` | `null`
 * `bearing_input_ref`: `magnetic` | `true` | `null` — what the reading was before correction
-* `speed_source`: `estimated` | `kestrel`
+* `speed_source`: `estimated` | `measured`
 * `heading_magnetic_raw` is provenance only, and is `null` when the reading was already
   true-referenced — the app does not invent a magnetic value it never saw. Authoritative
   direction is always `downwind_true` / `from_true`.
 
 **A categorical intensity never produces a numeric speed.** `speed_mph` stays `null`
-with `speed_source: "estimated"` unless an actual Kestrel reading is typed in, which
-sets `speed_source: "kestrel"`. The two coexist: a Kestrel number does not erase the
-qualitative category.
+with `speed_source: "estimated"` unless a real anemometer reading is typed in, which
+sets `speed_source: "measured"`. The two coexist: a measured number does not erase the
+qualitative category. Records written before v1.4.3 used `"kestrel"` for the same
+thing; they are rewritten to `"measured"` once, on first launch of a newer version, so
+an export never carries two spellings of one concept.
 
 **No discernible wind** stores no direction at all:
 
@@ -253,7 +255,7 @@ The list is one line per observation, newest first:
 ```
 
 Tap a row for every stored field, plus correction of intensity, bearing, gusty, and
-Kestrel speed, a free-text note, and delete (confirmed). Correcting an entry to
+measured speed, a free-text note, and delete (confirmed). Correcting an entry to
 "no discernible wind" clears its direction fields.
 
 ### CSV export
@@ -312,7 +314,7 @@ line:
 
 ```
 OFFLINE READY ✓
-WindMark v1.4.2 cached locally
+WindMark v1.4.3 cached locally
 ```
 
 or
@@ -335,7 +337,7 @@ all four of:
 the service worker (`importScripts`), so the check and the cache can never disagree
 about what "cached" means. Because the cache name carries the version, a half-installed
 update cannot masquerade as ready: v1.5.0 asks for the v1.5.0 cache and gets `NOT READY`
-until that cache is complete, while v1.4.2 keeps working from its own.
+until that cache is complete, while v1.4.3 keeps working from its own.
 
 ### PRE-SEARCH CHECK
 
@@ -459,8 +461,9 @@ No build step, no bundler, no npm, no framework, no backend. Edit a file, reload
 rule, the downwind/from convention, the Euler-to-heading math, bearing labelling, the
 source-specific sensor reference, the compass authority rule, the bearing/intensity
 invariant across edits, manual-entry range rejection, wording, the true-only export
-rule, the offline-readiness verdict, the pre-search states, and that the cached asset
-list matches both what the page loads and what is on disk (223 checks). It drives the
+rule, the offline-readiness verdict, the pre-search states, the speed-source rename and
+its migration, and that the cached asset list matches both what the page loads and what
+is on disk (242 checks). It drives the
 compass with synthetic orientation events through the real listeners.
 
 Two optional Playwright harnesses cover what needs a real browser:
@@ -490,7 +493,7 @@ Software-verifiable, checked in a Chromium harness with faked sensors:
 - [x] "No discernible wind" stores no directional bearing
 - [x] "Calm" stores a directional bearing
 - [x] Estimated intensity never fabricates a numeric mph
-- [x] Kestrel speed is distinguishable from an estimate (`speed_source`)
+- [x] A measured speed is distinguishable from an estimate (`speed_source`)
 - [x] iOS `webkitCompassHeading` is treated as magnetic and cannot be reconfigured
 - [x] A sensor bearing is authoritative only when compass status is `ok`
 - [x] Relative-only orientation is never usable
