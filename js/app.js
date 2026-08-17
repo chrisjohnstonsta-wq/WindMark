@@ -22,6 +22,8 @@ var App = (function () {
   var lastSavedId = null;
   var overlayTimer = null;
   var uiTimer = null;
+  var obsCount = 0;          // cached: the capture screen redraws 5x/sec and
+                             // must not re-parse stored observations each time
 
   /* ---------- tiny helpers ---------------------------------------------- */
 
@@ -38,6 +40,7 @@ var App = (function () {
     var s = el('screen-' + name);
     if (s) s.classList.add('active');
     window.scrollTo(0, 0);
+    if (name === 'capture') refreshCount();
     if (name === 'list') renderList();
     if (name === 'sessions') renderSessions();
     if (name === 'settings') renderSettings();
@@ -118,7 +121,11 @@ var App = (function () {
       (settings.sensor_ref === 'true' ? ' · sensor reads TRUE' : '');
 
     el('top-session').textContent = session ? session.name : '—';
-    el('top-count').textContent = String(Store.getObservations(session.id).length);
+    el('top-count').textContent = String(obsCount);
+  }
+
+  function refreshCount() {
+    obsCount = session ? Store.getObservations(session.id).length : 0;
   }
 
   /* A sensor heading we are willing to write into a log. Relative
@@ -257,6 +264,7 @@ var App = (function () {
 
     lastSavedId = rec.id;
     pending = null;
+    refreshCount();
 
     var main = (intensity === 'none')
       ? 'NO DISCERNIBLE WIND'
@@ -298,6 +306,7 @@ var App = (function () {
     lastSavedId = null;
     hideOverlay();
     if (err) alert(err);
+    refreshCount();
     updateCapture();
   }
 
@@ -575,6 +584,7 @@ var App = (function () {
     bind('use', function (id) {
       Store.setActiveSession(id);
       session = Store.getActiveSession();
+      refreshCount();
       renderSessions(); updateCapture();
     });
     bind('rename', function (id) {
@@ -602,6 +612,7 @@ var App = (function () {
       var err = Store.deleteSession(id);
       if (err) { alert(err); return; }
       session = Store.getActiveSession();
+      refreshCount();
       renderSessions(); updateCapture();
     });
   }
@@ -826,6 +837,7 @@ var App = (function () {
       var r = Store.newSession(name.trim() || undefined);
       if (r.error) { alert(r.error); return; }
       session = Store.getActiveSession();
+      refreshCount();
       renderSessions();
       updateCapture();
     });
@@ -895,6 +907,7 @@ var App = (function () {
     settings = Store.getSettings();
     var storageErr = Store.selfTest();
     session = Store.getActiveSession();
+    refreshCount();
 
     wire();
 
