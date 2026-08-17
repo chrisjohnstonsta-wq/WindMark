@@ -836,14 +836,16 @@ var LAT = 39.865811, LON = -105.216763;   // the project's actual latitude
 
 /* --- destination points: direction and distance both come back --------- */
 [0, 1, 45, 90, 180, 270, 359].forEach(function (brg) {
-  [30, 60, 90, 120].forEach(function (dist) {
+  [8, 12, 16, 20].forEach(function (dist) {          // the four symbolic lengths
     var p = CT.destination(LAT, LON, brg, dist);
     var back = CT.distanceM([LON, LAT], p);
     var bear = CT.bearingDeg([LON, LAT], p);
     ok('destination ' + brg + '°/' + dist + 'm lands at the right distance',
-      Math.abs(back - dist) < 0.5, back.toFixed(2));
+      Math.abs(back - dist) < 0.05, back.toFixed(3));
     ok('destination ' + brg + '°/' + dist + 'm lands on the right bearing',
       Math.abs(S.angleDiff(bear, brg)) < 0.5, bear.toFixed(3));
+    ok('destination ' + brg + '°/' + dist + 'm keeps ~cm precision',
+      Math.abs(back - dist) < 0.05 && p[0] !== 0 && p[1] !== 0);
     ok('destination ' + brg + '°/' + dist + 'm is finite and in range',
       isFinite(p[0]) && isFinite(p[1]) && p[0] >= -180 && p[0] <= 180 && p[1] >= -90 && p[1] <= 90,
       p.join(','));
@@ -851,37 +853,42 @@ var LAT = 39.865811, LON = -105.216763;   // the project's actual latitude
 });
 
 /* Cardinal sanity, in plain terms. */
-var north = CT.destination(LAT, LON, 0, 120);
+var north = CT.destination(LAT, LON, 0, 20);
 ok('000°T moves north and not east', north[1] > LAT && Math.abs(north[0] - LON) < 1e-6,
   north.join(','));
-var east = CT.destination(LAT, LON, 90, 120);
+var east = CT.destination(LAT, LON, 90, 20);
 ok('090°T moves east and barely north', east[0] > LON && Math.abs(east[1] - LAT) < 1e-5,
   east.join(','));
-var south = CT.destination(LAT, LON, 180, 120);
+var south = CT.destination(LAT, LON, 180, 20);
 ok('180°T moves south', south[1] < LAT && Math.abs(south[0] - LON) < 1e-6);
-var west = CT.destination(LAT, LON, 270, 120);
+var west = CT.destination(LAT, LON, 270, 20);
 ok('270°T moves west', west[0] < LON && Math.abs(west[1] - LAT) < 1e-5);
 
 /* The north seam: 359 and 001 must straddle north, not jump. */
-var n359 = CT.destination(LAT, LON, 359, 120);
-var n001 = CT.destination(LAT, LON, 1, 120);
+var n359 = CT.destination(LAT, LON, 359, 20);
+var n001 = CT.destination(LAT, LON, 1, 20);
 ok('359°T is just west of north', n359[0] < LON && n359[1] > LAT, n359.join(','));
 ok('001°T is just east of north', n001[0] > LON && n001[1] > LAT, n001.join(','));
 ok('359°T and 001°T are near-mirror images about north',
-  Math.abs((LON - n359[0]) - (n001[0] - LON)) < 1e-6);
+  Math.abs((LON - n359[0]) - (n001[0] - LON)) < 1e-7);
 ok('the 0/360 seam does not change the answer',
-  CT.destination(LAT, LON, 360, 90)[1].toFixed(6) === CT.destination(LAT, LON, 0, 90)[1].toFixed(6));
+  CT.destination(LAT, LON, 360, 16)[1].toFixed(7) === CT.destination(LAT, LON, 0, 16)[1].toFixed(7));
 
 /* --- longitude must scale with latitude ---------------------------------- */
 (function () {
-  var d = 120;
+  var d = 20;                                   // the longest arrow
   var atProject = CT.destination(LAT, LON, 90, d)[0] - LON;
   var naive = d / 111320;                       // degrees if longitude were flat
   var expected = d / (111320 * Math.cos(LAT * Math.PI / 180));
+  // 111320 m/degree is itself a rounded constant, so a few 1e-7 of slack is
+  // the approximation's, not the code's — and still 200x tighter than the
+  // flat-earth error checked next.
   ok('longitude step at 39.9°N matches cos(lat) scaling',
-    Math.abs(atProject - expected) < 2e-6, atProject.toFixed(8) + ' vs ' + expected.toFixed(8));
+    Math.abs(atProject - expected) < 1e-6, atProject.toFixed(9) + ' vs ' + expected.toFixed(9));
+  // At 20 m the flat-earth shortcut is out by ~5.4e-5°, roughly 4.6 m of
+  // longitude — a quarter of the arrow, and visible.
   ok('longitude is NOT treated as a constant metres-per-degree',
-    Math.abs(atProject - naive) > 2e-4, 'diff ' + Math.abs(atProject - naive).toFixed(8));
+    Math.abs(atProject - naive) > 4e-5, 'diff ' + Math.abs(atProject - naive).toFixed(9));
 
   var atEquator = CT.destination(0, 0, 90, d)[0];
   var atSixty = CT.destination(60, 0, 90, d)[0];
@@ -893,17 +900,17 @@ ok('the 0/360 seam does not change the answer',
 
 /* --- arrow shape ---------------------------------------------------------- */
 [0, 1, 45, 90, 180, 270, 359].forEach(function (brg) {
-  var pos = CT.arrowPositions(LAT, LON, brg, 90);
+  var pos = CT.arrowPositions(LAT, LON, brg, 16);      // moderate
   ok('arrow at ' + brg + '°T is one 5-point LineString', pos.length === 5);
   var tail = pos[0], tip = pos[1], left = pos[2], mid = pos[3], right = pos[4];
 
   ok('arrow ' + brg + '°T starts at the observation',
-    Math.abs(tail[0] - LON) < 1e-6 && Math.abs(tail[1] - LAT) < 1e-6);
+    Math.abs(tail[0] - LON) < 1e-7 && Math.abs(tail[1] - LAT) < 1e-7);
   ok('arrow ' + brg + '°T points down-wind, not up-wind',
     Math.abs(S.angleDiff(CT.bearingDeg(tail, tip), brg)) < 0.5,
     CT.bearingDeg(tail, tip).toFixed(2));
   ok('arrow ' + brg + '°T is the requested length',
-    Math.abs(CT.distanceM(tail, tip) - 90) < 0.5, CT.distanceM(tail, tip).toFixed(2));
+    Math.abs(CT.distanceM(tail, tip) - 16) < 0.05, CT.distanceM(tail, tip).toFixed(3));
   ok('arrow ' + brg + '°T returns to the tip between barbs',
     mid[0] === tip[0] && mid[1] === tip[1]);
 
@@ -912,11 +919,11 @@ ok('the 0/360 seam does not change the answer',
     CT.distanceM(tail, left) < CT.distanceM(tail, tip));
   ok('arrow ' + brg + '°T right barb is behind the tip',
     CT.distanceM(tail, right) < CT.distanceM(tail, tip));
-  var headLen = 90 * CT.ARROW.head_fraction;
+  var headLen = 16 * CT.ARROW.head_fraction;      // 4.48 m
   ok('arrow ' + brg + '°T barbs are the configured head length',
-    Math.abs(CT.distanceM(tip, left) - headLen) < 0.5 &&
-    Math.abs(CT.distanceM(tip, right) - headLen) < 0.5,
-    CT.distanceM(tip, left).toFixed(2));
+    Math.abs(CT.distanceM(tip, left) - headLen) < 0.05 &&
+    Math.abs(CT.distanceM(tip, right) - headLen) < 0.05,
+    CT.distanceM(tip, left).toFixed(3));
   var back = (brg + 180) % 360;
   ok('arrow ' + brg + '°T barbs are swept ±' + CT.ARROW.head_angle_deg + '°',
     Math.abs(Math.abs(S.angleDiff(CT.bearingDeg(tip, left), back)) - CT.ARROW.head_angle_deg) < 1 &&
@@ -957,19 +964,30 @@ var ctx = { searchName: 'Bear Creek 8/17', folderName: 'Handler Training' };
   ok('a wind from the west-north-west draws an arrow to the east-south-east',
     c[1][0] > c[0][0] && c[1][1] < c[0][1], JSON.stringify(c.slice(0, 2)));
   ok('the tail is the observation fix',
-    c[0][0] === Math.round(LON * 1e6) / 1e6 && c[0][1] === Math.round(LAT * 1e6) / 1e6);
+    c[0][0] === Math.round(LON * 1e7) / 1e7 && c[0][1] === Math.round(LAT * 1e7) / 1e7);
 })();
 
 /* --- symbolic lengths ------------------------------------------------------ */
-ok('calm is 30 m', CT.lengthFor('calm') === 30);
-ok('light is 60 m', CT.lengthFor('light') === 60);
-ok('moderate is 90 m', CT.lengthFor('moderate') === 90);
-ok('strong is 120 m', CT.lengthFor('strong') === 120);
-[['calm', 30], ['light', 60], ['moderate', 90], ['strong', 120]].forEach(function (pair) {
+ok('calm is 8 m', CT.lengthFor('calm') === 8);
+ok('light is 12 m', CT.lengthFor('light') === 12);
+ok('moderate is 16 m', CT.lengthFor('moderate') === 16);
+ok('strong is 20 m', CT.lengthFor('strong') === 20);
+ok('the four lengths increase with intensity',
+  CT.lengthFor('calm') < CT.lengthFor('light') &&
+  CT.lengthFor('light') < CT.lengthFor('moderate') &&
+  CT.lengthFor('moderate') < CT.lengthFor('strong'));
+// Compact glyphs, not geographic vectors: even the longest arrow is a small
+// fraction of a 20-acre search area (~285 m on a side).
+ok('every arrow is a compact glyph, not a vector across the search area',
+  CT.lengthFor('strong') <= 30, String(CT.lengthFor('strong')));
+[['calm', 8], ['light', 12], ['moderate', 16], ['strong', 20]].forEach(function (pair) {
   var f = CT.featureFor(ctObs({ intensity: pair[0] }), ctx);
   var c = f.geometry.coordinates;
   ok(pair[0] + ' draws a ' + pair[1] + ' m shaft',
-    Math.abs(CT.distanceM(c[0], c[1]) - pair[1]) < 0.5, CT.distanceM(c[0], c[1]).toFixed(2));
+    Math.abs(CT.distanceM(c[0], c[1]) - pair[1]) < 0.05, CT.distanceM(c[0], c[1]).toFixed(3));
+  ok(pair[0] + ' barbs stay 28% of its own shaft',
+    Math.abs(CT.distanceM(c[1], c[2]) - pair[1] * 0.28) < 0.05,
+    CT.distanceM(c[1], c[2]).toFixed(3));
 });
 (function () {
   // A measured speed is metadata. It must not touch the geometry.
@@ -993,8 +1011,8 @@ ok('strong is 120 m', CT.lengthFor('strong') === 120);
   var f = CT.featureFor(none, ctx);
   ok('no discernible wind is a Point', f.geometry.type === 'Point');
   ok('the point sits on the observation fix',
-    f.geometry.coordinates[0] === Math.round(LON * 1e6) / 1e6 &&
-    f.geometry.coordinates[1] === Math.round(LAT * 1e6) / 1e6);
+    f.geometry.coordinates[0] === Math.round(LON * 1e7) / 1e7 &&
+    f.geometry.coordinates[1] === Math.round(LAT * 1e7) / 1e7);
   ok('its title says No discernible wind', f.properties.title === '14:45 No discernible wind',
     f.properties.title);
   ok('it carries no bearing at all',

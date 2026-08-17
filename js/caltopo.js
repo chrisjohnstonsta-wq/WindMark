@@ -44,7 +44,9 @@
    SYMBOLIC LENGTHS — READ THIS BEFORE CHANGING THEM
    ======================================================================
 
-   Arrow length encodes the qualitative intensity category and nothing else.
+   Arrows are compact map glyphs — a few metres — because a single SAR search
+   area is small and crowded with observations. Arrow length encodes the
+   qualitative intensity category and nothing else.
    It is NOT scent travel distance, plume length, dog detection range,
    duration, or wind speed. A measured wind speed, when present, is metadata
    in the description and does not change the geometry by so much as a metre.
@@ -57,11 +59,20 @@ var CalTopo = (function () {
      Change these after seeing real arrows on a real map, and nothing else. */
   var ARROW = {
     // Symbolic map length per intensity, in metres. Visual encoding only.
+    //
+    // These are compact directional glyphs, not geographic vectors. An
+    // individual SAR search area is roughly 20-150 acres and often nearer the
+    // small end — a 150-acre square is only about 780 m on a side — with
+    // several areas and many observations on screen at once. Arrows have to
+    // read as symbols pinned to a point, not as distances across the area.
+    //
+    // First physical-rendering values. Expect to retune them after seeing
+    // real arrows over a real track in the CalTopo app.
     length_m: {
-      calm: 30,
-      light: 60,
-      moderate: 90,
-      strong: 120
+      calm: 8,
+      light: 12,
+      moderate: 16,
+      strong: 20
     },
     head_fraction: 0.28,      // barb length as a fraction of the shaft (25–30%)
     head_angle_deg: 30,       // barb angle either side of the reversed shaft
@@ -72,7 +83,11 @@ var CalTopo = (function () {
     marker_color: '#4a90e2',  // no-discernible-wind point
     marker_symbol: 'circle',
     marker_size: 'medium',
-    coord_decimals: 6         // ~0.1 m; more would be false precision
+    // ~1 cm. Six decimals (~0.1 m) is plenty for a 120 m vector but is over
+    // 1% of an 8 m glyph, and quantising a 2.2 m barb that coarsely swings
+    // its angle by up to 1.5°. Seven keeps the arrowhead shape honest at this
+    // scale and costs one character per coordinate.
+    coord_decimals: 7
   };
 
   var EARTH_R = 6371008.8;    // IUGG mean radius, metres
@@ -85,7 +100,7 @@ var CalTopo = (function () {
     return ((lon + 540) % 360) - 180;
   }
 
-  function round6(v) {
+  function roundCoord(v) {
     var f = Math.pow(10, ARROW.coord_decimals);
     return Math.round(v * f) / f;
   }
@@ -106,7 +121,7 @@ var CalTopo = (function () {
     var x = Math.cos(d) - Math.sin(p1) * sinP2;
     var l2 = l1 + Math.atan2(y, x);
 
-    return [round6(normLon(deg(l2))), round6(deg(p2))];
+    return [roundCoord(normLon(deg(l2))), roundCoord(deg(p2))];
   }
 
   /* Inverse of destination, for tests and for anything that needs to check
@@ -136,7 +151,7 @@ var CalTopo = (function () {
   /* The five positions of one arrow. lat/lon are the observation's fix;
      downwindTrue is the direction the wind is blowing toward. */
   function arrowPositions(lat, lon, downwindTrue, lengthMetres) {
-    var tail = [round6(normLon(lon)), round6(lat)];
+    var tail = [roundCoord(normLon(lon)), roundCoord(lat)];
     var tip = destination(lat, lon, downwindTrue, lengthMetres);
 
     // Barbs are measured back from the TIP, along the reversed shaft,
@@ -223,7 +238,7 @@ var CalTopo = (function () {
       // No discernible wind: a point, not a zero-length or invented arrow.
       return {
         type: 'Feature',
-        geometry: { type: 'Point', coordinates: [round6(normLon(o.lon)), round6(o.lat)] },
+        geometry: { type: 'Point', coordinates: [roundCoord(normLon(o.lon)), roundCoord(o.lat)] },
         properties: {
           title: titleFor(o),
           description: descriptionFor(o, ctx),
