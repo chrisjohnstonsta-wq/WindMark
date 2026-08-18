@@ -280,7 +280,7 @@ BEARING does not exist on a no-discernible-wind observation.
   "speed_source": "estimated",
   "gusty": false,
   "note": "",
-  "app_version": "1.6.2"
+  "app_version": "1.6.3"
 }
 ```
 
@@ -411,10 +411,10 @@ every test bearing by projecting it onto the downwind axis.
 
 Every point is a geodesic destination — great-circle bearing and distance on a sphere of
 radius 6 371 008.8 m — not a flat offset, so longitude scales correctly with latitude
-(20 m due east spans 0.0002343° of longitude at 39.9°N, not the 0.00018° a fixed
-metres-per-degree constant would give — a 4.6 m error, a quarter of the arrow) and the
+(42 m due east spans 0.000492° of longitude at 39.9°N, not the 0.000377° a fixed
+metres-per-degree constant would give — a 9.7 m error, a quarter of the arrow) and the
 0/360 seam is a non-event. Coordinates carry seven decimals, about 1 cm: six (~0.1 m)
-would be over 1% of an 8 m glyph and would swing a 2.2 m barb by up to 1.5°.
+would be 3% of the 3.4 m barb on the shortest glyph.
 
 Barbs sweep back from the tip along the reversed shaft — 28% of the shaft at ±30°,
 unchanged for this test — so they always fall inside the shaft length. Everything tunable sits in
@@ -425,17 +425,20 @@ precision, and the lengths below.
 
 | Intensity | Arrow |
 |---|---|
-| Calm | 8 m |
-| Light | 12 m |
-| Moderate | 16 m |
-| Strong | 20 m |
+| Calm | 12 m |
+| Light | 20 m |
+| Moderate | 30 m |
+| Strong | 42 m |
 
-Compact map glyphs, not geographic vectors. An individual SAR search area runs roughly
-20–150 acres and is often nearer the small end — 20 acres is about 285 m on a side — with
+Map glyphs, not geographic vectors. An individual SAR search area runs roughly 20–150
+acres and is often nearer the small end — 20 acres is about 285 m on a side — with
 several areas and many observations on screen at once, so an arrow has to read as a
-symbol pinned to a point rather than a distance across the area. Even the longest arrow,
-head included, spans about 24 m. **These are first-rendering values and may well change
-after the first real CalTopo import.**
+symbol pinned to a point rather than a distance across the area.
+
+Second pass. The first CalTopo import worked and the convention read correctly, but the
+arrows were too subtle and the categories too close to tell apart, so these are longer
+and the steps between them widen as intensity rises (8, 10, 12 m) instead of scaling
+evenly. **Still subject to change after the next import.**
 
 **Visual encoding only.** Not scent travel distance, not plume length, not dog detection
 range, not duration, not wind speed. A measured wind speed, when present, is metadata in
@@ -501,7 +504,7 @@ line:
 
 ```
 OFFLINE READY ✓
-WindMark v1.6.2 cached locally
+WindMark v1.6.3 cached locally
 ```
 
 or
@@ -524,7 +527,7 @@ all four of:
 the service worker (`importScripts`), so the check and the cache can never disagree
 about what "cached" means. Because the cache name carries the version, a half-installed
 update cannot masquerade as ready: v1.5.0 asks for the v1.5.0 cache and gets `NOT READY`
-until that cache is complete, while v1.6.2 keeps working from its own.
+until that cache is complete, while v1.6.3 keeps working from its own.
 
 ### PRE-SEARCH CHECK
 
@@ -657,7 +660,7 @@ its migration, the folder/search organisation with its destructive-prompt wordin
 CalTopo arrow geometry across seven bearings and all four symbolic lengths — tip on the
 recorded fix, tail upwind, nothing projecting downwind past it, north seam included — and
 that the cached asset list matches both what the page loads and what is on disk
-(690 checks). It drives the
+(693 checks). It drives the
 compass with synthetic orientation events through the real listeners.
 
 Two optional Playwright harnesses cover what needs a real browser:

@@ -836,7 +836,7 @@ var LAT = 39.865811, LON = -105.216763;   // the project's actual latitude
 
 /* --- destination points: direction and distance both come back --------- */
 [0, 1, 45, 90, 180, 270, 359].forEach(function (brg) {
-  [8, 12, 16, 20].forEach(function (dist) {          // the four symbolic lengths
+  [12, 20, 30, 42].forEach(function (dist) {         // the four symbolic lengths
     var p = CT.destination(LAT, LON, brg, dist);
     var back = CT.distanceM([LON, LAT], p);
     var bear = CT.bearingDeg([LON, LAT], p);
@@ -853,30 +853,30 @@ var LAT = 39.865811, LON = -105.216763;   // the project's actual latitude
 });
 
 /* Cardinal sanity, in plain terms. */
-var north = CT.destination(LAT, LON, 0, 20);
+var north = CT.destination(LAT, LON, 0, 42);
 ok('000°T moves north and not east', north[1] > LAT && Math.abs(north[0] - LON) < 1e-6,
   north.join(','));
-var east = CT.destination(LAT, LON, 90, 20);
+var east = CT.destination(LAT, LON, 90, 42);
 ok('090°T moves east and barely north', east[0] > LON && Math.abs(east[1] - LAT) < 1e-5,
   east.join(','));
-var south = CT.destination(LAT, LON, 180, 20);
+var south = CT.destination(LAT, LON, 180, 42);
 ok('180°T moves south', south[1] < LAT && Math.abs(south[0] - LON) < 1e-6);
-var west = CT.destination(LAT, LON, 270, 20);
+var west = CT.destination(LAT, LON, 270, 42);
 ok('270°T moves west', west[0] < LON && Math.abs(west[1] - LAT) < 1e-5);
 
 /* The north seam: 359 and 001 must straddle north, not jump. */
-var n359 = CT.destination(LAT, LON, 359, 20);
-var n001 = CT.destination(LAT, LON, 1, 20);
+var n359 = CT.destination(LAT, LON, 359, 42);
+var n001 = CT.destination(LAT, LON, 1, 42);
 ok('359°T is just west of north', n359[0] < LON && n359[1] > LAT, n359.join(','));
 ok('001°T is just east of north', n001[0] > LON && n001[1] > LAT, n001.join(','));
 ok('359°T and 001°T are near-mirror images about north',
   Math.abs((LON - n359[0]) - (n001[0] - LON)) < 1e-7);
 ok('the 0/360 seam does not change the answer',
-  CT.destination(LAT, LON, 360, 16)[1].toFixed(7) === CT.destination(LAT, LON, 0, 16)[1].toFixed(7));
+  CT.destination(LAT, LON, 360, 30)[1].toFixed(7) === CT.destination(LAT, LON, 0, 30)[1].toFixed(7));
 
 /* --- longitude must scale with latitude ---------------------------------- */
 (function () {
-  var d = 20;                                   // the longest arrow
+  var d = 42;                                   // the longest arrow
   var atProject = CT.destination(LAT, LON, 90, d)[0] - LON;
   var naive = d / 111320;                       // degrees if longitude were flat
   var expected = d / (111320 * Math.cos(LAT * Math.PI / 180));
@@ -885,10 +885,10 @@ ok('the 0/360 seam does not change the answer',
   // flat-earth error checked next.
   ok('longitude step at 39.9°N matches cos(lat) scaling',
     Math.abs(atProject - expected) < 1e-6, atProject.toFixed(9) + ' vs ' + expected.toFixed(9));
-  // At 20 m the flat-earth shortcut is out by ~5.4e-5°, roughly 4.6 m of
-  // longitude — a quarter of the arrow, and visible.
+  // At 42 m the flat-earth shortcut is out by ~1.1e-4°, roughly 9.7 m of
+  // longitude — a quarter of the arrow, and plainly visible on a map.
   ok('longitude is NOT treated as a constant metres-per-degree',
-    Math.abs(atProject - naive) > 4e-5, 'diff ' + Math.abs(atProject - naive).toFixed(9));
+    Math.abs(atProject - naive) > 9e-5, 'diff ' + Math.abs(atProject - naive).toFixed(9));
 
   var atEquator = CT.destination(0, 0, 90, d)[0];
   var atSixty = CT.destination(60, 0, 90, d)[0];
@@ -903,7 +903,7 @@ ok('the 0/360 seam does not change the answer',
    could have supplied scent lies upwind of it. So the glyph hangs upwind and
    nothing it draws lies downwind of where the team actually was. */
 [0, 1, 45, 90, 180, 270, 359].forEach(function (brg) {
-  var pos = CT.arrowPositions(LAT, LON, brg, 16);      // moderate
+  var pos = CT.arrowPositions(LAT, LON, brg, 30);      // moderate
   ok('arrow at ' + brg + '°T is one 5-point LineString', pos.length === 5);
   var tail = pos[0], tip = pos[1], left = pos[2], mid = pos[3], right = pos[4];
   var fix = [Math.round(LON * 1e7) / 1e7, Math.round(LAT * 1e7) / 1e7];
@@ -917,7 +917,7 @@ ok('the 0/360 seam does not change the answer',
 
   // 2. the tail is one shaft length upwind of it
   ok('arrow ' + brg + '°T tail is the shaft length from the fix',
-    Math.abs(CT.distanceM(tip, tail) - 16) < 0.05, CT.distanceM(tip, tail).toFixed(3));
+    Math.abs(CT.distanceM(tip, tail) - 30) < 0.05, CT.distanceM(tip, tail).toFixed(3));
   ok('arrow ' + brg + '°T tail lies upwind of the fix',
     Math.abs(S.angleDiff(CT.bearingDeg(tip, tail), upwind)) < 0.5,
     CT.bearingDeg(tip, tail).toFixed(2));
@@ -937,7 +937,7 @@ ok('the 0/360 seam does not change the answer',
   });
 
   // 5. barbs sweep back from the recorded coordinate, ±head_angle either side
-  var headLen = 16 * CT.ARROW.head_fraction;      // 4.48 m
+  var headLen = 30 * CT.ARROW.head_fraction;      // 8.4 m
   ok('arrow ' + brg + '°T barbs are the configured head length',
     Math.abs(CT.distanceM(tip, left) - headLen) < 0.05 &&
     Math.abs(CT.distanceM(tip, right) - headLen) < 0.05,
@@ -961,20 +961,20 @@ ok('the 0/360 seam does not change the answer',
 /* The 0/360 seam, stated in plain compass terms: a wind blowing due north
    hangs its glyph due south of the fix, and vice versa. */
 (function () {
-  var n = CT.arrowPositions(LAT, LON, 0, 20);
+  var n = CT.arrowPositions(LAT, LON, 0, 42);
   ok('a due-north wind puts the tail due south of the fix',
     n[0][1] < n[1][1] && Math.abs(n[0][0] - n[1][0]) < 1e-7, n[0].join(','));
-  var s360 = CT.arrowPositions(LAT, LON, 360, 20);
+  var s360 = CT.arrowPositions(LAT, LON, 360, 42);
   ok('360°T draws exactly what 0°T draws', JSON.stringify(s360) === JSON.stringify(n));
-  var a359 = CT.arrowPositions(LAT, LON, 359, 20);
-  var a001 = CT.arrowPositions(LAT, LON, 1, 20);
+  var a359 = CT.arrowPositions(LAT, LON, 359, 42);
+  var a001 = CT.arrowPositions(LAT, LON, 1, 42);
   ok('359°T hangs its tail just east of due south',
     a359[0][0] > a359[1][0] && a359[0][1] < a359[1][1], a359[0].join(','));
   ok('001°T hangs its tail just west of due south',
     a001[0][0] < a001[1][0] && a001[0][1] < a001[1][1], a001[0].join(','));
   ok('both still tip exactly on the fix',
     a359[1][1] === a001[1][1] && a359[1][0] === a001[1][0]);
-  var s180 = CT.arrowPositions(LAT, LON, 180, 20);
+  var s180 = CT.arrowPositions(LAT, LON, 180, 42);
   ok('a due-south wind puts the tail due north of the fix',
     s180[0][1] > s180[1][1] && Math.abs(s180[0][0] - s180[1][0]) < 1e-7);
 })();
@@ -1012,19 +1012,33 @@ var ctx = { searchName: 'Bear Creek 8/17', folderName: 'Handler Training' };
 })();
 
 /* --- symbolic lengths ------------------------------------------------------ */
-ok('calm is 8 m', CT.lengthFor('calm') === 8);
-ok('light is 12 m', CT.lengthFor('light') === 12);
-ok('moderate is 16 m', CT.lengthFor('moderate') === 16);
-ok('strong is 20 m', CT.lengthFor('strong') === 20);
+ok('calm is 12 m', CT.lengthFor('calm') === 12);
+ok('light is 20 m', CT.lengthFor('light') === 20);
+ok('moderate is 30 m', CT.lengthFor('moderate') === 30);
+ok('strong is 42 m', CT.lengthFor('strong') === 42);
 ok('the four lengths increase with intensity',
   CT.lengthFor('calm') < CT.lengthFor('light') &&
   CT.lengthFor('light') < CT.lengthFor('moderate') &&
   CT.lengthFor('moderate') < CT.lengthFor('strong'));
-// Compact glyphs, not geographic vectors: even the longest arrow is a small
-// fraction of a 20-acre search area (~285 m on a side).
-ok('every arrow is a compact glyph, not a vector across the search area',
-  CT.lengthFor('strong') <= 30, String(CT.lengthFor('strong')));
-[['calm', 8], ['light', 12], ['moderate', 16], ['strong', 20]].forEach(function (pair) {
+// Still glyphs, not geographic vectors: the longest arrow is well under a
+// fifth of a 20-acre search area (~285 m on a side).
+ok('every arrow stays a glyph, not a vector across the search area',
+  CT.lengthFor('strong') <= 60, String(CT.lengthFor('strong')));
+// The first import showed the categories too close to tell apart, so the gaps
+// now widen as intensity rises rather than staying even.
+(function () {
+  var g1 = CT.lengthFor('light') - CT.lengthFor('calm');
+  var g2 = CT.lengthFor('moderate') - CT.lengthFor('light');
+  var g3 = CT.lengthFor('strong') - CT.lengthFor('moderate');
+  ok('each step up in intensity is at least as big as the last', g2 >= g1 && g3 >= g2,
+    [g1, g2, g3].join(','));
+  ok('the shortest and longest differ by more than 3x',
+    CT.lengthFor('strong') / CT.lengthFor('calm') > 3,
+    (CT.lengthFor('strong') / CT.lengthFor('calm')).toFixed(2));
+  ok('no two categories are within 5 m of each other', g1 >= 5 && g2 >= 5 && g3 >= 5,
+    [g1, g2, g3].join(','));
+})();
+[['calm', 12], ['light', 20], ['moderate', 30], ['strong', 42]].forEach(function (pair) {
   var f = CT.featureFor(ctObs({ intensity: pair[0] }), ctx);
   var c = f.geometry.coordinates;
   ok(pair[0] + ' draws a ' + pair[1] + ' m shaft',

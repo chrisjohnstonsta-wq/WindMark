@@ -56,8 +56,8 @@
    SYMBOLIC LENGTHS — READ THIS BEFORE CHANGING THEM
    ======================================================================
 
-   Arrows are compact map glyphs — a few metres — because a single SAR search
-   area is small and crowded with observations. Arrow length encodes the
+   Arrows are map glyphs — tens of metres — because a single SAR search area
+   is small and crowded with observations. Arrow length encodes the
    qualitative intensity category and nothing else.
    It is NOT scent travel distance, plume length, dog detection range,
    duration, or wind speed. A measured wind speed, when present, is metadata
@@ -72,19 +72,22 @@ var CalTopo = (function () {
   var ARROW = {
     // Symbolic map length per intensity, in metres. Visual encoding only.
     //
-    // These are compact directional glyphs, not geographic vectors. An
-    // individual SAR search area is roughly 20-150 acres and often nearer the
-    // small end — a 150-acre square is only about 780 m on a side — with
-    // several areas and many observations on screen at once. Arrows have to
-    // read as symbols pinned to a point, not as distances across the area.
+    // These are directional glyphs, not geographic vectors. An individual SAR
+    // search area is roughly 20-150 acres and often nearer the small end — a
+    // 150-acre square is only about 780 m on a side — with several areas and
+    // many observations on screen at once, so an arrow has to read as a symbol
+    // pinned to a point rather than a distance across the area.
     //
-    // First physical-rendering values. Expect to retune them after seeing
-    // real arrows over a real track in the CalTopo app.
+    // Second pass. The first CalTopo import worked and the convention read
+    // correctly, but the arrows were too subtle and the categories too close
+    // together to tell apart. These are longer, and the steps between them
+    // widen as intensity rises (8, 10, 12 m) so the four categories separate
+    // at a glance instead of scaling evenly.
     length_m: {
-      calm: 8,
-      light: 12,
-      moderate: 16,
-      strong: 20
+      calm: 12,
+      light: 20,
+      moderate: 30,
+      strong: 42
     },
     head_fraction: 0.28,      // barb length as a fraction of the shaft (25–30%)
     head_angle_deg: 30,       // barb angle either side of the reversed shaft
@@ -95,10 +98,10 @@ var CalTopo = (function () {
     marker_color: '#4a90e2',  // no-discernible-wind point
     marker_symbol: 'circle',
     marker_size: 'medium',
-    // ~1 cm. Six decimals (~0.1 m) is plenty for a 120 m vector but is over
-    // 1% of an 8 m glyph, and quantising a 2.2 m barb that coarsely swings
-    // its angle by up to 1.5°. Seven keeps the arrowhead shape honest at this
-    // scale and costs one character per coordinate.
+    // ~1 cm. Six decimals (~0.1 m) would be 3% of the 3.4 m barb on the
+    // shortest glyph and would swing its angle by about a degree. Seven keeps
+    // the arrowhead shape honest at this scale and costs one character per
+    // coordinate.
     coord_decimals: 7
   };
 
